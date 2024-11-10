@@ -1,0 +1,22 @@
+{
+    "StencilType": 0,
+    "NumDims": 3,
+    "Arch": {
+        "NumPEs": [2, 2],
+        "VecLanes": 3,
+        "AggAdders": 2,
+        "HaloLanes": [2, 2]
+    },
+    "Mem": {
+        "Depth": 1,
+        "DRAM_BW": 8,
+        "DMBW": 8,
+        "DVBW": 8,
+        "HVBW": 8
+    },
+    "Delay": {
+        "Mul": 1,
+        "Div": 2,
+        "Add": 1
+    }
+}
