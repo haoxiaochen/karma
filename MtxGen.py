@@ -179,10 +179,10 @@ def get_linear_system(dim, stencil_type, x, y, z):
                         and z_new >= 0
                         and z_new < z
                     ):
-                        matrix_value[k * y * z + j * z + i][l] = -1.0
+                        matrix_value[x_new * y * z + y_new * z + z_new][l] = -1.0
                         cnt += 1
                     else:
-                        matrix_value[k * y * z + j * z + i][l] = 0.0
+                        matrix_value[x_new * y * z + y_new * z + z_new][l] = 0.0
                 matrix_diag[k * y * z + j * z + i] = cnt + 1.0
     data = { "size": (x, y, z), "A": matrix_value, "diag_a": matrix_diag, "b": right_hand_side }
     return data
@@ -247,6 +247,6 @@ def preprocess(data, tile_x, tile_y, stencil_type):
                     halo_y[dim_0][p % tile_x] = (value, index)
                     halo_y_index[dim_0][p % tile_x] = vec_index[halo_dim_0][p % tile_x][0] if halo_dim_0 >= 0 else (-1, -1, -1)
 
-    data = { "size": (x, y, z), "A": matrix_value, "diag_A": matrix_diag, "b": right_hand_side, "ijk": vec_index, "x": np.zeros(dim_shape, dtype=object),
+    data = { "size": (x, y, z), "A": matrix_value, "diag_A": matrix_diag, "b": right_hand_side, "ijk": vec_index, "x": np.zeros((x,y,z), dtype=object),
                                 "halo_x": halo_x, "halo_x_ijk": halo_x_index, "halo_y": halo_y, "halo_y_ijk": halo_y_index }
     return data

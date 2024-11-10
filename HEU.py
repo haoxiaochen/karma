@@ -31,7 +31,7 @@ class HEU:
             out = 0; agg_out = 0
             if self.stencil_type == 0: # Star
                 out = yield self.boundary_ports[i].out.get()
-            elif self.stencil_type == 2: # Diamon
+            elif self.stencil_type == 2: # Diamond
                 if self.position == 0:
                     out = yield self.boundary_ports[i].out.get() if i != self.num_PEs[1] else 0
                     agg_out = yield self.boundary_ports[i].agg_out.get()
