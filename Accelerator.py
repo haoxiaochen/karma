@@ -72,10 +72,10 @@ class HaloData:
         self.iters = math.ceil(self.dim0_extent / self.Z_depth)
         self.halo_points = get_num_halo_points(cfg["StencilType"], cfg["NumDims"], position, self.tile_Y if position==0 else self.tile_X)
         # double buffering with the size of 2*depth
-        self.halo_vec_in = [simpy.Store(env, capacity=2*self.Z_depth)] * self.halo_points
-        self.halo_idx_in = [simpy.Store(env, capacity=2*self.Z_depth)] * self.halo_points
-        self.halo_vec_out = [simpy.Store(env, capacity=2*self.Z_depth)] * self.halo_points
-        self.halo_idx_out = [simpy.Store(env, capacity=2*self.Z_depth)] * self.halo_points
+        self.halo_vec_in = [simpy.Store(env, capacity=2*self.Z_depth) for _ in range(self.halo_points)]
+        self.halo_idx_in = [simpy.Store(env, capacity=2*self.Z_depth) for _ in range(self.halo_points)]
+        self.halo_vec_out = [simpy.Store(env, capacity=2*self.Z_depth) for _ in range(self.halo_points)]
+        self.halo_idx_out = [simpy.Store(env, capacity=2*self.Z_depth) for _ in range(self.halo_points)]
         # index
         self.dim0_idx = 0
 
@@ -125,8 +125,8 @@ class Accelerator:
         # PE array
         self.tile_X = cfg["Arch"]["NumPEs"][0]
         self.tile_Y = cfg["Arch"]["NumPEs"][1]
-        self.boundary_x = [BoundaryPorts(env)] * self.tile_Y  # X:1, Y:0
-        self.boundary_y = [BoundaryPorts(env)] * self.tile_X
+        self.boundary_x = [BoundaryPorts(env) for _ in range(self.tile_Y)]  # X:1, Y:0
+        self.boundary_y = [BoundaryPorts(env) for _ in range(self.tile_X)]
         self.PE_Array = PEArray(env, cfg, self.buffers, self.domain_data, [self.boundary_x, self.boundary_y])
         # HEU
         self.HEU_X = HEU(env, cfg, self.buffers, self.halo_data_X, self.boundary_x, 0)  # X:0, Y:1

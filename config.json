@@ -9,10 +9,10 @@
     },
     "Mem": {
         "Depth": 1,
-        "DRAM_BW": 8,
-        "DMBW": 8,
-        "DVBW": 8,
-        "HVBW": 8
+        "DRAM_BW": 115,
+        "DMBW": 128,
+        "DVBW": 128,
+        "HVBW": 128
     },
     "Delay": {
         "Mul": 1,

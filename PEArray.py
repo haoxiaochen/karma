@@ -53,7 +53,6 @@ class PE:
             b = yield self.data.domain_vec_in[self.i][self.j].get()
             aii = yield self.data.domain_diag_mtx[self.i][self.j].get()
             index = yield self.data.domain_index[self.i][self.j].get()
-            logger.trace(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) ScalarUnit: get data from SRAM takes {self.env.now - tick} cycles")
 
             in_i = (yield self.ports.in_i.get()) if self.i != 0 else 0
             in_j = (yield self.ports.in_j.get()) if self.j != 0 else 0
@@ -102,7 +101,8 @@ class PE:
             # The remaining data are processed in pipelining
             Lanes = self.cfg["Arch"]["VecLanes"]
             delay = (NumPoints - 1) // Lanes
-            yield self.env.timeout(delay)
+            if delay > 0:
+                yield self.env.timeout(delay)
             yield self.vec_results.put(vec_results)
             logger.trace(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) VectorUnit: one iteration takes {self.env.now - tick} cycles")
 
@@ -114,10 +114,10 @@ class PE:
 
             if self.stencil_type == 0 and self.dims == 3: # Star7P
                 assert len(vec_results) == 3
-                yield self.ports.out_i.put(vec_results[1])
-                yield self.ports.out_j.put(vec_results[2])
-                logger.debug(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) Aggregator: pass term([1])={vec_results[1]} through out_i")
-                logger.debug(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) Aggregator: pass term([2])={vec_results[2]} through out_j")
+                yield self.ports.out_j.put(vec_results[1])
+                yield self.ports.out_i.put(vec_results[2])
+                logger.debug(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) Aggregator: pass term([1])={vec_results[1]} through out_j")
+                logger.debug(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) Aggregator: pass term([2])={vec_results[2]} through out_i")
             elif self.stencil_type == 2 and self.dims == 3: # Diamond13P
                 assert len(vec_results) == 6
                 agg_in_i = (yield self.ports.agg_in_i) if self.i != 0 else 0
@@ -163,26 +163,26 @@ class PEArray:
 
             if i != self.num_PEs[0]-1:
                 yield self.ports[i+1][j].in_i.put(out_i)
-                logger.info(f"(Cycle {self.env.now}) PEArray: pass from PE({i}, {j}) to PE({i+1}, {j}) through (out_i, in_i)")
+                logger.trace(f"(Cycle {self.env.now}) PEArray: pass from PE({i}, {j}) to PE({i+1}, {j}) through (out_i, in_i)")
                 if use_agg_i:
                     yield self.ports[i+1][j].agg_in_i.put(agg_out_i)
-                    logger.info(f"(Cycle {self.env.now}) PEArray: pass from PE({i}, {j}) to PE({i+1}, {j}) through (agg_out_i, agg_in_i)")
+                    logger.trace(f"(Cycle {self.env.now}) PEArray: pass from PE({i}, {j}) to PE({i+1}, {j}) through (agg_out_i, agg_in_i)")
             else:
                 yield self.boundaries[0][j].out.put(out_i)
-                logger.info(f"(Cycle {self.env.now}) PEArray: pass from PE({i}, {j}) to HEU (0, {j}) through out_i")
+                logger.trace(f"(Cycle {self.env.now}) PEArray: pass from PE({i}, {j}) to HEU (0, {j}) through out_i")
                 if use_agg_i:
                     yield self.boundaries[0][j+1].agg_out.put(agg_out_i)
-                    logger.info(f"(Cycle {self.env.now}) PEArray: pass from PE({i}, {j}) to HEU (0, {j}) through agg_out_i")
+                    logger.trace(f"(Cycle {self.env.now}) PEArray: pass from PE({i}, {j}) to HEU (0, {j}) through agg_out_i")
 
             if j != self.num_PEs[1]-1:
                 yield self.ports[i][j+1].in_j.put(out_j)
-                logger.info(f"(Cycle {self.env.now}) PEArray: pass from PE({i}, {j}) to PE({i}, {j+1}) through (out_j, in_j)")
+                logger.trace(f"(Cycle {self.env.now}) PEArray: pass from PE({i}, {j}) to PE({i}, {j+1}) through (out_j, in_j)")
                 if use_agg_j:
                     yield self.ports[i][j+1].agg_in_j.put(agg_out_j)
-                    logger.info(f"(Cycle {self.env.now}) PEArray: pass from PE({i}, {j}) to PE({i}, {j+1}) through (agg_out_j, agg_in_j)")
+                    logger.trace(f"(Cycle {self.env.now}) PEArray: pass from PE({i}, {j}) to PE({i}, {j+1}) through (agg_out_j, agg_in_j)")
             else:
                 yield self.boundaries[1][i].out.put(out_j)
-                logger.info(f"(Cycle {self.env.now}) PEArray: pass from PE({i}, {j}) to HEU (1, {i}) through out_j")
+                logger.trace(f"(Cycle {self.env.now}) PEArray: pass from PE({i}, {j}) to HEU (1, {i}) through out_j")
                 if use_agg_j:
                     yield self.boundaries[1][i+1].agg_out.put(agg_out_j)
-                    logger.info(f"(Cycle {self.env.now}) PEArray: pass from PE({i}, {j}) to HEU (1, {i}) through agg_out_j")
+                    logger.trace(f"(Cycle {self.env.now}) PEArray: pass from PE({i}, {j}) to HEU (1, {i}) through agg_out_j")

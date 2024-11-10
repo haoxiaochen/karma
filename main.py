@@ -28,7 +28,7 @@ if __name__ == "__main__":
     else:
         z = 1
     data = get_linear_system(dims, stencil, x, y, z)
-    data = preprocess(data, config["Arch"]["NumPEs"][0], config["Arch"]["NumPEs"][1], stencil)
+    data = preprocess(data, config["Arch"]["NumPEs"][0], config["Arch"]["NumPEs"][1], stencil, dims)
 
     env = simpy.Environment()
     acc = Accelerator(env, config, data)

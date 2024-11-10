@@ -187,7 +187,7 @@ def get_linear_system(dim, stencil_type, x, y, z):
     data = { "size": (x, y, z), "A": matrix_value, "diag_a": matrix_diag, "b": right_hand_side }
     return data
 
-def preprocess(data, tile_x, tile_y, stencil_type):
+def preprocess(data, tile_x, tile_y, stencil_type, dims):
     x, y, z = data["size"]
     num_tile_x = math.ceil(x / tile_x)
     num_tile_y = math.ceil(y / tile_y)
@@ -200,13 +200,12 @@ def preprocess(data, tile_x, tile_y, stencil_type):
     right_hand_side = np.ones(dim_shape)
     vec_index = np.zeros(dim_shape, dtype=object)
     # padding for halo data
-    halo_layers = 1
-    padd_x = tile_y + (1 if stencil_type == 1 else 0)
-    padd_y = tile_x
-    halo_x = np.zeros((num_tiles*z, padd_x*halo_layers), dtype=object)
-    halo_y = np.zeros((num_tiles*z, padd_y*halo_layers), dtype=object)
-    halo_x_index = np.zeros((num_tiles*z, padd_x*halo_layers), dtype=object)
-    halo_y_index = np.zeros((num_tiles*z, padd_y*halo_layers), dtype=object)
+    padd_x = get_num_halo_points(stencil_type, dims, 0, tile_y)
+    padd_y = get_num_halo_points(stencil_type, dims, 1, tile_x)
+    halo_x = np.zeros((num_tiles*z, padd_x), dtype=object)
+    halo_y = np.zeros((num_tiles*z, padd_y), dtype=object)
+    halo_x_index = np.zeros((num_tiles*z, padd_x), dtype=object)
+    halo_y_index = np.zeros((num_tiles*z, padd_y), dtype=object)
     # domain data
     for out_i in range(num_tile_x):
         for out_j in range(num_tile_y):
@@ -243,7 +242,7 @@ def preprocess(data, tile_x, tile_y, stencil_type):
                     halo_tile_idx = halo_tile_x * num_tile_y + halo_tile_y
                     halo_dim_0 = halo_tile_idx * z + k if halo_tile_x < num_tile_x and halo_tile_y < num_tile_y else -1
                     value = right_hand_side[halo_dim_0][p % tile_x][0] if halo_dim_0 >= 0 else 0
-                    index = (halo_dim_0, 0, p % tile_x)
+                    index = (halo_dim_0, p % tile_x, 0)
                     halo_y[dim_0][p % tile_x] = (value, index)
                     halo_y_index[dim_0][p % tile_x] = vec_index[halo_dim_0][p % tile_x][0] if halo_dim_0 >= 0 else (-1, -1, -1)
 
