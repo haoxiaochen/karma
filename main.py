@@ -1,6 +1,7 @@
 import json
 import simpy
 import sys
+import os
 from loguru import logger
 from MtxGen import get_linear_system, preprocess
 from Accelerator import *
@@ -14,8 +15,15 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python main.py <config_file> x y z")
         sys.exit(1)
+
+    log_path = "log/trace.log"
+    if os.path.exists(log_path):
+        os.remove(log_path)
+
     logger.remove()
-    logger.add(sys.stderr, format="<level>{message}</level>", level="WARNING", filter=lambda r: "" in r["message"])
+
+    logger.add(log_path, level="DEBUG")
+    # logger.add(sys.stderr, format="<level>{message}</level>", level="WARNING", filter=lambda r: "" in r["message"])
 
     config_file = sys.argv[1]
     config = read_config(config_file)

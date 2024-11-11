@@ -50,21 +50,25 @@ class PE:
             # Get data from the buffer
             tick = self.env.now
             yield self.env.process(self.bufs.domain_vec_in.access(2))
+            logger.info(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) ScalarUnit: get domain vec access ready takes {self.env.now - tick} cycles")
+
             b = yield self.data.domain_vec_in[self.i][self.j].get()
+            logger.info(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) ScalarUnit: get domain vec data ready takes {self.env.now - tick} cycles")
             aii = yield self.data.domain_diag_mtx[self.i][self.j].get()
             index = yield self.data.domain_index[self.i][self.j].get()
+            logger.info(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) ScalarUnit: get diag and index data ready takes {self.env.now - tick} cycles")
 
             in_i = (yield self.ports.in_i.get()) if self.i != 0 else 0
             in_j = (yield self.ports.in_j.get()) if self.j != 0 else 0
             R_k = (yield self.R_k.get()) if index[2] != 0 else 0
-            logger.trace(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) ScalarUnit: get data ready takes {self.env.now - tick} cycles")
+            logger.info(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) ScalarUnit: get data ready takes {self.env.now - tick} cycles")
 
             sum = in_i + in_j + R_k
             x = (b - sum) / aii
             logger.info(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) ScalarUnit: compute variable x{index}={x} with aii={aii}, b={b}, in_i={in_i}, in_j={in_j}, R_k={R_k}")
             self.add_counter += 4
             self.div_counter += 1
-            delay = self.cfg["Delay"]["Add"] + self.cfg["Delay"]["Div"]
+            delay = 2 * self.cfg["Delay"]["Add"] + self.cfg["Delay"]["Div"]
             yield self.env.timeout(delay)
             yield self.new_x.put((x, index))
 
@@ -79,8 +83,9 @@ class PE:
             new_x = yield self.new_x.get()
             yield self.env.process(self.bufs.domain_mtx.access(NumPoints))
             vec_A = yield self.data.domain_mtx[self.i][self.j].get()
+
             logger.trace(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) VectorUnit: get data ready takes {self.env.now - tick} cycles")
-        
+
             self.shift_x.insert(0, new_x)
             if self.stencil_type == 0 and self.dims == 3: # Star7P
                 if len(self.shift_x) > 1:
@@ -124,7 +129,7 @@ class PE:
                 out_j = agg_in_i + self.vec_results[2] + self.vec_results[3]
                 agg_out_j = self.vec_results[4] + self.vec_results[5]
                 add_times = 2 if self.cfg["Arch"]["AggAdders"] < 2 else 1
-                self.env.timeout(add_times * self.cfg["Delay"]["Add"])
+                yield self.env.timeout(add_times * self.cfg["Delay"]["Add"])
                 self.add_counter += 2
 
                 yield self.ports.out_i.put(vec_results[1])
@@ -159,7 +164,7 @@ class PEArray:
                 agg_out_i = yield self.ports[i][j].agg_out_i.get()
             if use_agg_j:
                 agg_out_j = yield self.ports[i][j].agg_out_j.get()
-            yield self.env.timeout(1)  # Forward delay
+            # yield self.env.timeout(1)  # Forward delay
 
             if i != self.num_PEs[0]-1:
                 yield self.ports[i+1][j].in_i.put(out_i)
