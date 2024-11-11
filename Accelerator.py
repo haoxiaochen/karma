@@ -88,7 +88,6 @@ class HaloData:
 
     def get_previous(self):
         # Get updated b from the current execution
-        dim0_extent = math.prod(self.data["size"]) / (self.tile_X * self.tile_Y)
         for _ in range(self.Z_depth):
             for i in range(self.halo_points):
                 value, index = yield self.halo_vec_out[i].get()
@@ -139,7 +138,7 @@ class Accelerator:
         yield self.domain_dram.proc_write
 
     def run(self):
-        bar = progressbar.ProgressBar(maxval=self.domain_data.iters)
+        bar = progressbar.ProgressBar(maxval=self.domain_data.iters * self.domain_data.Z_depth)
         if self.progressbar: bar.start()
         while True:
             yield self.env.timeout(1)  # Simulate processing time
