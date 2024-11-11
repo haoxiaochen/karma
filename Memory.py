@@ -28,8 +28,7 @@ class DRAM:
         self.name = name
         self.DRAM_BW = bw
         self.data = data
-        self.counter_read = 0
-        self.counter_write = 0
+        self.counter = 0
         self.proc_read = env.process(self.run_read())
         self.proc_write = env.process(self.run_write())
         self.actions = [self.proc_read, self.proc_write]
@@ -37,7 +36,7 @@ class DRAM:
     def run_read(self):
         for i in range(self.data.iters):
             size = self.data.get_read_size()
-            self.counter_read += size
+            self.counter += size
             delay = ceil(size / self.DRAM_BW)
             yield self.env.timeout(delay)
             logger.trace(f"(Cycle {self.env.now}) DRAM: read {size} {self.name} values (iter {i}) takes {delay} cycles")
@@ -47,7 +46,7 @@ class DRAM:
     def run_write(self):
         for i in range(self.data.iters):
             size = self.data.get_write_size()
-            self.counter_write += size
+            self.counter += size
             delay = ceil(size / self.DRAM_BW)
             yield self.env.process(self.data.get_previous())
             logger.trace(f"(Cycle {self.env.now}) DRAM: write {size} {self.name} values (iter {i}) needs {delay} cycles")
@@ -58,8 +57,9 @@ class Buffers:
     def __init__(self, env, cfg):
         self.env = env
         self.cfg = cfg
-        self.domain_vec_in = SRAM(env, "domain_vec_in", cfg["Mem"]["DVBW"])
-        self.domain_vec_out = SRAM(env, "domain_vec_out", cfg["Mem"]["DVBW"])
-        self.domain_mtx = SRAM(env, "domain_mtx", cfg["Mem"]["DMBW"])
-        self.halo_vec_in = SRAM(env, "halo_vec_in", cfg["Mem"]["HVBW"])
-        self.halo_vec_out = SRAM(env, "halo_vec_out", cfg["Mem"]["HVBW"])
+        self.domain_vec_in = SRAM(env, "domain_vec_in", cfg["Mem"]["DomainVec_BW"])
+        self.domain_vec_out = SRAM(env, "domain_vec_out", cfg["Mem"]["DomainVec_BW"])
+        self.domain_diag_mtx = SRAM(env, "domain_diag_mtx", cfg["Mem"]["DomainVec_BW"])
+        self.domain_mtx = SRAM(env, "domain_mtx", cfg["Mem"]["DomainMtx_BW"])
+        self.halo_vec_in = SRAM(env, "halo_vec_in", cfg["Mem"]["HaloVec_BW"])
+        self.halo_vec_out = SRAM(env, "halo_vec_out", cfg["Mem"]["HaloVec_BW"])

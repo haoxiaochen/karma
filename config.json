@@ -1,6 +1,7 @@
 {
     "StencilType": 0,
     "NumDims": 3,
+    "Freq": 0.5,
     "Arch": {
         "NumPEs": [2, 2],
         "VecLanes": 3,
@@ -10,13 +11,20 @@
     "Mem": {
         "Depth": 1,
         "DRAM_BW": 115,
-        "DMBW": 128,
-        "DVBW": 128,
-        "HVBW": 128
+        "DomainMtx_BW": 128,
+        "DomainVec_BW": 128,
+        "HaloVec_BW": 128
     },
     "Delay": {
         "Mul": 1,
         "Div": 2,
         "Add": 1
+    },
+    "Energy": {
+        "DRAM": 1,
+        "SRAM": 1,
+        "Add": 1,
+        "Mul": 1,
+        "Div": 1
     }
 }

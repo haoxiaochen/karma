@@ -49,7 +49,8 @@ class PE:
         while True:
             # Get data from the buffer
             tick = self.env.now
-            yield self.env.process(self.bufs.domain_vec_in.access(2))
+            yield self.env.process(self.bufs.domain_vec_in.access(1))
+            yield self.env.process(self.bufs.domain_diag_mtx.access(1))
             b = yield self.data.domain_vec_in[self.i][self.j].get()
             aii = yield self.data.domain_diag_mtx[self.i][self.j].get()
             index = yield self.data.domain_index[self.i][self.j].get()
@@ -146,6 +147,12 @@ class PEArray:
         self.ports = [[PEPorts(env) for _ in range(self.num_PEs[1])] for _ in range(self.num_PEs[0])]
         self.PEs = [[PE(env, cfg, bufs, data, self.ports[i][j], i, j) for j in range(self.num_PEs[1])] for i in range(self.num_PEs[0])]
         self.actions = [env.process(self.run(i, j)) for i in range(self.num_PEs[0]) for j in range(self.num_PEs[1])]
+
+    def stat(self):
+        mul_counter = sum([pe.mul_counter for row in self.PEs for pe in row])
+        div_counter = sum([pe.div_counter for row in self.PEs for pe in row])
+        add_counter = sum([pe.add_counter for row in self.PEs for pe in row])
+        return mul_counter, div_counter, add_counter
 
     def run(self, i, j):
         while True:
