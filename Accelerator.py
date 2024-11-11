@@ -88,7 +88,6 @@ class HaloData:
 
     def get_previous(self):
         # Get updated b from the current execution
-        dim0_extent = math.prod(self.data["size"]) / (self.tile_X * self.tile_Y)
         for _ in range(self.Z_depth):
             for i in range(self.halo_points):
                 value, index = yield self.halo_vec_out[i].get()
@@ -115,15 +114,14 @@ class Accelerator:
         self.env = env
         self.cfg = cfg
         self.data = data
-        self.counter = 0
         self.progressbar = progressbar
         # Memory
         self.domain_data = DomainData(env, cfg, data)
-        self.domain_dram = DRAM(env, "domain_data", cfg["Mem"]["DMBW"], self.domain_data)
+        self.domain_dram = DRAM(env, "domain_data", cfg["Mem"]["DRAM_BW"], self.domain_data)
         self.halo_data_X = HaloData(env, cfg, data, 0)
-        self.halo_dram_X = DRAM(env, "halo_x", cfg["Mem"]["HVBW"], self.halo_data_X)
+        self.halo_dram_X = DRAM(env, "halo_x", cfg["Mem"]["DRAM_BW"], self.halo_data_X)
         self.halo_data_Y = HaloData(env, cfg, data, 1)
-        self.halo_dram_Y = DRAM(env, "halo_y", cfg["Mem"]["HVBW"], self.halo_data_Y)
+        self.halo_dram_Y = DRAM(env, "halo_y", cfg["Mem"]["DRAM_BW"], self.halo_data_Y)
         self.buffers = Buffers(env, cfg)
         # PE array
         self.tile_X = cfg["Arch"]["NumPEs"][0]
@@ -140,12 +138,10 @@ class Accelerator:
         yield self.domain_dram.proc_write
 
     def run(self):
-        bar = progressbar.ProgressBar(maxval=self.domain_data.iters)
+        bar = progressbar.ProgressBar(maxval=self.domain_data.iters * self.domain_data.Z_depth)
         if self.progressbar: bar.start()
         while True:
-            logger.debug(f"(Cycle {self.env.now}) Accelerator: start a new iteration {self.counter}")
             yield self.env.timeout(1)  # Simulate processing time
-            self.counter += 1
             if self.progressbar: bar.update(self.domain_data.dim0_idx)
 
     def check_correctness(self):
@@ -156,14 +152,42 @@ class Accelerator:
         return True
 
     def print(self):
-        print("="*50)
-        print("SIMULATION REPORT")
-        print("="*50)
-        print(f"Total cycles: {self.counter}")
-        print(f"Domain DRAM read count: {self.domain_dram.counter_read}")
-        print(f"Domain DRAM write count: {self.domain_dram.counter_write}")
-        print(f"Halo DRAM X read count: {self.halo_dram_X.counter_read}")
-        print(f"Halo DRAM X write count: {self.halo_dram_X.counter_write}")
-        print(f"Halo DRAM Y read count: {self.halo_dram_Y.counter_read}")
-        print(f"Halo DRAM Y write count: {self.halo_dram_Y.counter_write}")
-        print("="*50 + "\n")
+        wall_clock_time = self.env.now / (self.cfg["Freq"]*1e9)
+        delay = self.cfg["Delay"]["Add"] + self.cfg["Delay"]["Div"] + self.cfg["Delay"]["Mul"]
+        ideal_cycles = math.ceil(math.prod(self.data["size"])/(self.tile_X * self.tile_Y)) * delay
+
+        halo_counter = self.halo_dram_X.counter + self.halo_dram_Y.counter
+        dram_energy = (self.domain_dram.counter + halo_counter)*self.cfg["Energy"]["DRAM"]
+        domain_vector = self.buffers.domain_vec_in.counter + self.buffers.domain_vec_out.counter
+        halo_vector = self.buffers.halo_vec_in.counter + self.buffers.halo_vec_out.counter
+        sram_energy = (domain_vector + halo_vector + self.buffers.domain_mtx.counter + self.buffers.domain_diag_mtx.counter)*self.cfg["Energy"]["SRAM"]
+
+        PE_mul, PE_div, PE_add = self.PE_Array.stat()
+        HEU_add = self.HEU_X.add_counter + self.HEU_Y.add_counter
+        add_energy = (PE_add + HEU_add)*self.cfg["Energy"]["Add"]
+        mul_energy = PE_mul*self.cfg["Energy"]["Mul"]
+        div_energy = PE_div*self.cfg["Energy"]["Div"]
+        compute_energy = add_energy + mul_energy + div_energy
+        total_energy = dram_energy + sram_energy + compute_energy
+
+        print("="*80)
+        print(" "*30, "SIMULATION REPORT", " "*30)
+        print("="*80)
+        print(f"Total Cycles: {self.env.now}")
+        print(f"Wallclock Time: {wall_clock_time * 1000:.2f} ms")
+        print(f"PE Utilization: {ideal_cycles / self.env.now * 100:.2f}%")
+        print('-'*35, "DRAM", '-'*35)
+        print(f"Domain Access Volume: {self.domain_dram.counter},\t\t\tAverage BW: {(self.domain_dram.counter*8/1e9)/wall_clock_time:.2f} GB/s")
+        print(f"Halo Access Volume: {halo_counter},\t\t\tAverage BW: {(halo_counter*8/1e9)/wall_clock_time:.2f} GB/s")
+        print(f"Energy: {dram_energy} pJ ({dram_energy / total_energy * 100:.2f}%)")
+        print('-'*35, "SRAM", '-'*35)
+        print(f"Domain Vector Access Volume: {domain_vector},\t\tAverage BW: {(domain_vector*8/1e9)/wall_clock_time:.2f} GB/s")
+        print(f"Halo Vector Access Volume: {halo_vector},\t\tAverage BW: {(halo_vector*8/1e9)/wall_clock_time:.2f} GB/s")
+        print(f"Domain Matrix Access Volume: {self.buffers.domain_mtx.counter},\t\tAverage BW: {(self.buffers.domain_mtx.counter*8/1e9)/wall_clock_time:.2f} GB/s")
+        print(f"Domain Diagonal Access Volume: {self.buffers.domain_diag_mtx.counter},\t\tAverage BW: {(self.buffers.domain_diag_mtx.counter*8/1e9)/wall_clock_time:.2f} GB/s")
+        print(f"Energy: {sram_energy} pJ ({sram_energy / total_energy * 100:.2f}%)")
+        print('-'*34, "PE/HEU", '-'*34)
+        print(f"PE Add: {PE_add}, Mul: {PE_mul}, Div: {PE_div}")
+        print(f"HEU Add: {HEU_add}")
+        print(f"Energy: {compute_energy} pJ ({compute_energy / total_energy * 100:.2f}%)")
+        print("="*80 + "\n")

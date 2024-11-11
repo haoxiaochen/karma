@@ -1,22 +1,37 @@
 {
     "StencilType": 0,
     "NumDims": 3,
+    "Freq": 0.5,
     "Arch": {
+<<<<<<< HEAD
         "NumPEs": [4, 4],
         "VecLanes": 3,
         "AggAdders": 2,
         "HaloLanes": [4, 4]
+=======
+        "NumPEs": [8, 8],
+        "VecLanes": 3,
+        "AggAdders": 2,
+        "HaloLanes": [8, 8]
+>>>>>>> 4e07033e63d63fdff7c4d8ff0bf0839e6edb786a
     },
     "Mem": {
-        "Depth": 1,
+        "Depth": 8,
         "DRAM_BW": 115,
-        "DMBW": 128,
-        "DVBW": 128,
-        "HVBW": 128
+        "DomainMtx_BW": 128,
+        "DomainVec_BW": 128,
+        "HaloVec_BW": 128
     },
     "Delay": {
         "Mul": 1,
         "Div": 2,
         "Add": 1
+    },
+    "Energy": {
+        "DRAM": 1,
+        "SRAM": 1,
+        "Add": 1,
+        "Mul": 1,
+        "Div": 1
     }
 }
