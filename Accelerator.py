@@ -1,5 +1,6 @@
 import simpy
 import math
+import progressbar
 from Memory import *
 from PEArray import *
 from HEU import *
@@ -101,19 +102,21 @@ class HaloData:
         for _ in range(self.Z_depth):
             for i in range(self.halo_points):
                 halo = "halo_x" if self.position == 0 else "halo_y"
-                value = self.data[halo][self.dim0_idx][i]
-                index = self.data[halo+"_ijk"][self.dim0_idx][i]
-                yield self.halo_vec_in[i].put(self.data[halo][self.dim0_idx][i])
-                yield self.halo_idx_in[i].put(index)
-                logger.trace(f"(Cycle {self.env.now}) HaloData: put b{index}={value[0]} to HEU ({self.position}, {i})")
+                index = self.data[halo][self.dim0_idx][i]
+                value = self.data["b"][index]
+                ijk = self.data["ijk"][index]
+                yield self.halo_vec_in[i].put((value, index))
+                yield self.halo_idx_in[i].put(ijk)
+                logger.trace(f"(Cycle {self.env.now}) HaloData: put b{ijk}={value} to HEU ({self.position}, {i})")
             self.dim0_idx += 1
 
 class Accelerator:
-    def __init__(self, env, cfg, data):
+    def __init__(self, env, cfg, data, progressbar=False):
         self.env = env
         self.cfg = cfg
         self.data = data
         self.counter = 0
+        self.progressbar = progressbar
         # Memory
         self.domain_data = DomainData(env, cfg, data)
         self.domain_dram = DRAM(env, "domain_data", cfg["Mem"]["DMBW"], self.domain_data)
@@ -137,15 +140,25 @@ class Accelerator:
         yield self.domain_dram.proc_write
 
     def run(self):
+        bar = progressbar.ProgressBar(maxval=self.domain_data.iters)
+        if self.progressbar: bar.start()
         while True:
             logger.debug(f"(Cycle {self.env.now}) Accelerator: start a new iteration {self.counter}")
             yield self.env.timeout(1)  # Simulate processing time
             self.counter += 1
+            if self.progressbar: bar.update(self.domain_data.dim0_idx)
+
+    def check_correctness(self):
+        for i in range(self.data["size"][0]):
+            for j in range(self.data["size"][1]):
+                for k in range(self.data["size"][2]):
+                    if self.data["x"][i][j][k] != 1.0: return False
+        return True
 
     def print(self):
-        print("\n" + "="*40)
-        print("SIMULATION SUMMARY")
-        print("="*40)
+        print("="*50)
+        print("SIMULATION REPORT")
+        print("="*50)
         print(f"Total cycles: {self.counter}")
         print(f"Domain DRAM read count: {self.domain_dram.counter_read}")
         print(f"Domain DRAM write count: {self.domain_dram.counter_write}")
@@ -153,4 +166,4 @@ class Accelerator:
         print(f"Halo DRAM X write count: {self.halo_dram_X.counter_write}")
         print(f"Halo DRAM Y read count: {self.halo_dram_Y.counter_read}")
         print(f"Halo DRAM Y write count: {self.halo_dram_Y.counter_write}")
-        print("="*40 + "\n")
+        print("="*50 + "\n")

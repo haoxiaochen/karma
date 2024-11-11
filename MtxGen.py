@@ -232,20 +232,14 @@ def preprocess(data, tile_x, tile_y, stencil_type, dims):
                     halo_tile_y = out_j if p < tile_y else out_j + 1
                     halo_tile_idx = halo_tile_x * num_tile_y + halo_tile_y
                     halo_dim_0 = halo_tile_idx * z + k if halo_tile_x < num_tile_x and halo_tile_y < num_tile_y else -1
-                    value = right_hand_side[halo_dim_0][0][p % tile_y] if halo_dim_0 >= 0 else 0
-                    index = (halo_dim_0, 0, p % tile_y)
-                    halo_x[dim_0][p % tile_y] = (value, index)
-                    halo_x_index[dim_0][p % tile_y] = vec_index[halo_dim_0][0][p % tile_y] if halo_dim_0 >= 0 else (-1, -1, -1)
+                    halo_x[dim_0][p % tile_y] = (halo_dim_0, 0, p % tile_y)
                 for p in range(padd_y):
                     halo_tile_x = out_i if p < tile_x else out_i + 1
                     halo_tile_y = out_j + 1
                     halo_tile_idx = halo_tile_x * num_tile_y + halo_tile_y
                     halo_dim_0 = halo_tile_idx * z + k if halo_tile_x < num_tile_x and halo_tile_y < num_tile_y else -1
-                    value = right_hand_side[halo_dim_0][p % tile_x][0] if halo_dim_0 >= 0 else 0
-                    index = (halo_dim_0, p % tile_x, 0)
-                    halo_y[dim_0][p % tile_x] = (value, index)
-                    halo_y_index[dim_0][p % tile_x] = vec_index[halo_dim_0][p % tile_x][0] if halo_dim_0 >= 0 else (-1, -1, -1)
+                    halo_y[dim_0][p % tile_x] = (halo_dim_0, p % tile_x, 0)
 
-    data = { "size": (x, y, z), "A": matrix_value, "diag_A": matrix_diag, "b": right_hand_side, "ijk": vec_index, "x": np.zeros((x,y,z), dtype=object),
-                                "halo_x": halo_x, "halo_x_ijk": halo_x_index, "halo_y": halo_y, "halo_y_ijk": halo_y_index }
+    data = { "size": (x, y, z), "A": matrix_value, "diag_A": matrix_diag, "b": right_hand_side, "ijk": vec_index,
+                                "halo_x": halo_x, "halo_y": halo_y, "x": np.zeros((x,y,z), dtype=object) }
     return data

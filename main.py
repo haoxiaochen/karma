@@ -15,7 +15,7 @@ if __name__ == "__main__":
         print("Usage: python main.py <config_file> x y z")
         sys.exit(1)
     logger.remove()
-    logger.add(sys.stderr, format="<level>{message}</level>", level="INFO", filter=lambda r: "" in r["message"])
+    logger.add(sys.stderr, format="<level>{message}</level>", level="WARNING", filter=lambda r: "" in r["message"])
 
     config_file = sys.argv[1]
     config = read_config(config_file)
@@ -31,7 +31,8 @@ if __name__ == "__main__":
     data = preprocess(data, config["Arch"]["NumPEs"][0], config["Arch"]["NumPEs"][1], stencil, dims)
 
     env = simpy.Environment()
-    acc = Accelerator(env, config, data)
+    acc = Accelerator(env, config, data, progressbar=True)
     proc = env.process(acc.wait_for_finish())
     env.run(until=proc)
+    print("\nCorrectness:", acc.check_correctness())
     acc.print()
