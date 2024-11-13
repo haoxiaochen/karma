@@ -25,18 +25,18 @@ class HEU:
         while True:
             tick = self.env.now
             yield self.env.process(self.bufs.halo_vec_in.access(1))
-            logger.trace(f"HEU({self.position}, {i}) is Waiting for b")
+            # logger.trace(f"HEU({self.position}, {i}) is Waiting for b")
             b_val, b_idx = yield self.data.halo_vec_in[i].get()
             b_ijk = yield self.data.halo_idx_in[i].get()
-            logger.trace(f"HEU({self.position}, {i}) received b")
+            # logger.trace(f"HEU({self.position}, {i}) received b")
 
             x_ijk = 0
             out = 0; agg_out = 0
             out_flag = 0; agg_flag = 0
             if self.stencil_type == 0: # Star
-                logger.trace(f"HEU({self.position}, {i}) is Waiting for output")
+                # logger.trace(f"HEU({self.position}, {i}) is Waiting for output")
                 out, x_ijk = yield self.boundary_ports[i].out.get()
-                logger.trace(f"HEU({self.position}, {i}) received the output")
+                # logger.trace(f"HEU({self.position}, {i}) received the output")
                 self.add_counter += 1
                 out_flag = 1
 
@@ -95,7 +95,7 @@ class HEU:
             # process time is determined by the number of lanes
             times = math.ceil(self.halo_points / self.num_lanes)
             delay = self.cfg["Delay"]["Add"] * times
-            yield self.env.timeout(math.ceil(delay))
+            yield self.env.timeout(delay)
             yield self.env.process(self.bufs.halo_vec_out.access(1))
             yield self.data.halo_vec_out[i].put((new_b, b_idx, out_flag, agg_flag))
             yield self.data.halo_idx_out[i].put(b_ijk)

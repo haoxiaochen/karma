@@ -158,11 +158,12 @@ def get_linear_system(dim, stencil_type, x, y, z):
     matrix_diag = np.zeros(grid_size)
     right_hand_side = np.ones(grid_size)
 
-    for i in range(z):
+    for k in range(x):
         for j in range(y):
-            for k in range(x):
+            for i in range(z):
                 # only lower triangular
                 sum = 0
+                idx = k * y * z + j * z + i
                 for l in range(stencil_length // 2):
                     if dim == 2:
                         dx, dy = stencil_points[l]
@@ -172,21 +173,15 @@ def get_linear_system(dim, stencil_type, x, y, z):
                     x_new = k + dx
                     y_new = j + dy
                     z_new = i + dz
-                    if (
-                        x_new >= 0
-                        and x_new < x
-                        and y_new >= 0
-                        and y_new < y
-                        and z_new >= 0
-                        and z_new < z
-                    ):
+                    idx_new = x_new * y * z + y_new * z + z_new
+                    if idx_new >= idx:
                         rand_num = -random.randint(1, 10)
-                        # rand_num = -1
-                        matrix_value[x_new * y * z + y_new * z + z_new][l] = rand_num
+                        matrix_value[idx_new][l] = rand_num
                         sum += rand_num
                     else:
-                        matrix_value[x_new * y * z + y_new * z + z_new][l] = 0.0
-                matrix_diag[k * y * z + j * z + i] = -sum + 1.0
+                        matrix_value[idx_new][l] = 0.0
+                matrix_diag[idx] = -sum + 1.0
+
     data = { "size": (x, y, z), "A": matrix_value, "diag_a": matrix_diag, "b": right_hand_side }
     return data
 

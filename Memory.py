@@ -17,7 +17,7 @@ class SRAM:
             if amount > 0:
                 yield self.container.put(amount)
             yield self.env.timeout(1)
-    
+
     def access(self, size):
         self.counter += size
         yield self.container.get(size)
@@ -35,12 +35,14 @@ class DRAM:
 
     def run_read(self):
         for i in range(self.data.iters):
+            tick = self.env.now
             size = self.data.get_read_size()
             self.counter += size
             delay = ceil(size / self.DRAM_BW)
             yield self.env.timeout(delay)
             logger.trace(f"(Cycle {self.env.now}) DRAM: read {size} {self.name} values (iter {i}) takes {delay} cycles")
             yield self.env.process(self.data.put_next())
+            logger.trace(f"(Cycle {self.env.now}) DRAM: put the read value to the port {size} {self.name} (iter {i}) takes {self.env.now - tick} cycles")
         logger.info(f"(Cycle {self.env.now}) DRAM: read {self.name} finished")
 
     def run_write(self):

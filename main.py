@@ -16,7 +16,7 @@ if __name__ == "__main__":
         print("Usage: python main.py <config_file> x y z")
         sys.exit(1)
 
-    log_path = "log/heu.log"
+    log_path = "log/compute.log"
     if os.path.exists(log_path):
         os.remove(log_path)
 
@@ -24,7 +24,7 @@ if __name__ == "__main__":
 
     # logger.add(log_path, level="DEBUG")
     logger.add(log_path, format="<level>{message}</level>",
-               level="TRACE", filter=lambda r: "(0, 4, 2)" in r["message"])
+               level="TRACE", filter=lambda r: "PE(0, 0) ScalarUnit: compute variable" in r["message"])
 
     config_file = sys.argv[1]
     config = read_config(config_file)

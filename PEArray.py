@@ -77,14 +77,14 @@ class PE:
             tick = self.env.now
             yield self.env.process(self.bufs.domain_vec_in.access(1))
             yield self.env.process(self.bufs.domain_diag_mtx.access(1))
+
+            aii = yield self.data.domain_diag_mtx[self.i][self.j].get()
+            ijk_index = yield self.data.domain_index[self.i][self.j].get()
+            logger.info(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) ScalarUnit: get aii, ijk_index ready takes {self.env.now - tick} cycles ijk_index={ijk_index}")
+
             logger.info(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) ScalarUnit: waiting for b")
             b = yield self.data.domain_vec_in[self.i][self.j].get()
             logger.info(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) ScalarUnit: get b ready takes {self.env.now - tick} cycles")
-            aii = yield self.data.domain_diag_mtx[self.i][self.j].get()
-            ijk_index = yield self.data.domain_index[self.i][self.j].get()
-
-            logger.info(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) ScalarUnit: get b, aii, ijk_index ready takes {self.env.now - tick} cycles ijk_index={ijk_index}")
-
 
             in_j_ijk = (yield self.ports.in_j_ijk.get()) if self.j != 0 else 0
             in_j = (yield self.ports.in_j.get()) if self.j != 0 else 0

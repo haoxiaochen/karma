@@ -32,12 +32,14 @@ class DomainData:
         self.read_dim0_idx = 0
 
     def get_read_size(self):
-        access_size = (self.tile_X * self.tile_Y) * self.Z_depth
-        num_points = len(self.data["A"][0])
+        depth = min((self.dim0_extent - self.put_dim0_idx), self.Z_depth)
+        access_size = (self.tile_X * self.tile_Y) * depth
+        num_points = self.data["A"].shape[-1]
         return (num_points + 2) * access_size
 
     def get_write_size(self):
-        access_size = (self.tile_X * self.tile_Y) * self.Z_depth
+        depth = min((self.dim0_extent - self.read_dim0_idx), self.Z_depth)
+        access_size = (self.tile_X * self.tile_Y) * depth
         return access_size
 
     def get_previous(self):
@@ -61,6 +63,7 @@ class DomainData:
                 for j in range(self.tile_Y):
                     # wait until b is valid (on halo and wholly updated by HEU)
                     while self.data["b_valid"][self.put_dim0_idx][i][j] > 0:
+                        # print("waiting for b to be valid")
                         yield self.env.timeout(1)
                     yield self.domain_vec_in[i][j].put(self.data["b"][self.put_dim0_idx][i][j])
                     yield self.domain_mtx[i][j].put(self.data["A"][self.put_dim0_idx][i][j])
@@ -96,10 +99,12 @@ class HaloData:
         self.stencil_type = cfg["StencilType"]
 
     def get_read_size(self):
-        return self.halo_points * self.Z_depth
+        depth = min((self.dim0_extent - self.put_dim0_idx), self.Z_depth)
+        return self.halo_points * depth
 
     def get_write_size(self):
-        return self.halo_points * self.Z_depth
+        depth = min((self.dim0_extent - self.read_dim0_idx), self.Z_depth)
+        return self.halo_points * depth
 
     def get_previous(self):
         for _ in range(int(min(self.Z_depth, self.dim0_extent - self.read_dim0_idx))):
@@ -214,7 +219,13 @@ class Accelerator:
     def print(self):
         wall_clock_time = self.env.now / (self.cfg["Freq"]*1e9)
         delay = self.cfg["Delay"]["Add"] + self.cfg["Delay"]["Div"] + self.cfg["Delay"]["Mul"]
-        ideal_cycles = math.ceil(math.prod(self.data["size"])/(self.tile_X * self.tile_Y)) * delay
+
+        tile_x_n = math.ceil(self.data["size"][0] / self.tile_X)
+        tile_y_n = math.ceil(self.data["size"][1] / self.tile_Y)
+        ideal_iters = tile_x_n * tile_y_n * self.data["size"][2]
+        ideal_cycles = ideal_iters * delay
+
+        ideal_cycles1 = math.prod(self.data["size"]) / (self.tile_X * self.tile_Y) * delay
 
         halo_counter = self.halo_dram_X.counter + self.halo_dram_Y.counter
         dram_energy = (self.domain_dram.counter + halo_counter)*self.cfg["Energy"]["DRAM"]
@@ -235,7 +246,8 @@ class Accelerator:
         print("="*80)
         print(f"Total Cycles: {self.env.now}")
         print(f"Wallclock Time: {wall_clock_time * 1000:.2f} ms")
-        print(f"PE Utilization: {ideal_cycles / self.env.now * 100:.2f}%")
+        print(f"Ideal delay: {delay}, Ideal Cycles: {ideal_cycles1}")
+        print(f"PE Utilization: {ideal_cycles1 / self.env.now * 100:.2f}%")
         print('-'*35, "DRAM", '-'*35)
         print(f"Domain Access Volume: {self.domain_dram.counter},\t\t\tAverage BW: {(self.domain_dram.counter*8/1e9)/wall_clock_time:.2f} GB/s")
         print(f"Halo Access Volume: {halo_counter},\t\t\tAverage BW: {(halo_counter*8/1e9)/wall_clock_time:.2f} GB/s")
