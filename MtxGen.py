@@ -3,6 +3,7 @@
 import sys
 import numpy as np
 import math
+import random
 
 def get_num_domain_points(stencil_type, dim):
     if stencil_type == 0:
@@ -24,7 +25,7 @@ def get_num_halo_points(stencil_type, dim, position, base):
     if stencil_type == 2:
         return base+1 if position == 0 else base
     if stencil_type == 3:
-        return 2*(base+1) if position == 0 else 2*base
+        return base+1 if position == 0 else 2*base
 
 def get_linear_system(dim, stencil_type, x, y, z):
     grid_size = x * y * z
@@ -161,7 +162,7 @@ def get_linear_system(dim, stencil_type, x, y, z):
         for j in range(y):
             for k in range(x):
                 # only lower triangular
-                cnt = 0
+                sum = 0
                 for l in range(stencil_length // 2):
                     if dim == 2:
                         dx, dy = stencil_points[l]
@@ -179,16 +180,19 @@ def get_linear_system(dim, stencil_type, x, y, z):
                         and z_new >= 0
                         and z_new < z
                     ):
-                        matrix_value[x_new * y * z + y_new * z + z_new][l] = -1.0
-                        cnt += 1
+                        rand_num = -random.randint(1, 10)
+                        # rand_num = -1
+                        matrix_value[x_new * y * z + y_new * z + z_new][l] = rand_num
+                        sum += rand_num
                     else:
                         matrix_value[x_new * y * z + y_new * z + z_new][l] = 0.0
-                matrix_diag[k * y * z + j * z + i] = cnt + 1.0
+                matrix_diag[k * y * z + j * z + i] = -sum + 1.0
     data = { "size": (x, y, z), "A": matrix_value, "diag_a": matrix_diag, "b": right_hand_side }
     return data
 
 def preprocess(data, tile_x, tile_y, stencil_type, dims):
     x, y, z = data["size"]
+    n = x * y * z
     num_tile_x = math.ceil(x / tile_x)
     num_tile_y = math.ceil(y / tile_y)
     num_tiles = num_tile_x * num_tile_y
@@ -204,8 +208,9 @@ def preprocess(data, tile_x, tile_y, stencil_type, dims):
     padd_y = get_num_halo_points(stencil_type, dims, 1, tile_x)
     halo_x = np.zeros((num_tiles*z, padd_x), dtype=object)
     halo_y = np.zeros((num_tiles*z, padd_y), dtype=object)
-    halo_x_index = np.zeros((num_tiles*z, padd_x), dtype=object)
-    halo_y_index = np.zeros((num_tiles*z, padd_y), dtype=object)
+    # halo_x_index = np.zeros((num_tiles*z, padd_x), dtype=object)
+    # halo_y_index = np.zeros((num_tiles*z, padd_y), dtype=object)
+    b_valid = np.zeros(dim_shape, dtype=np.int8)
     # domain data
     for out_i in range(num_tile_x):
         for out_j in range(num_tile_y):
@@ -217,9 +222,15 @@ def preprocess(data, tile_x, tile_y, stencil_type, dims):
                         total_i = out_i * tile_x + in_i
                         total_j = out_j * tile_y + in_j
                         addr = total_i * y * z + total_j * z + k
-                        matrix_value[dim_0][in_i][in_j] = data["A"][addr]
-                        matrix_diag[dim_0][in_i][in_j] = data["diag_a"][addr]
-                        right_hand_side[dim_0][in_i][in_j] = data["b"][addr]
+                        if addr < n:
+                            matrix_value[dim_0][in_i][in_j] = data["A"][addr]
+                            matrix_diag[dim_0][in_i][in_j] = data["diag_a"][addr]
+                            right_hand_side[dim_0][in_i][in_j] = data["b"][addr]
+                        else:
+                            matrix_value[dim_0][in_i][in_j] = np.zeros(stencil_length)
+                            matrix_diag[dim_0][in_i][in_j] = 1
+                            right_hand_side[dim_0][in_i][in_j] = 0
+
                         vec_index[dim_0][in_i][in_j] = (total_i, total_j, k)
     # halo data
     for out_i in range(num_tile_x):
@@ -227,19 +238,116 @@ def preprocess(data, tile_x, tile_y, stencil_type, dims):
             for k in range(z):
                 tile_idx = out_i * num_tile_y + out_j
                 dim_0 = tile_idx * z + k
-                for p in range(padd_x):
-                    halo_tile_x = out_i + 1
-                    halo_tile_y = out_j if p < tile_y else out_j + 1
-                    halo_tile_idx = halo_tile_x * num_tile_y + halo_tile_y
-                    halo_dim_0 = halo_tile_idx * z + k if halo_tile_x < num_tile_x and halo_tile_y < num_tile_y else -1
-                    halo_x[dim_0][p % tile_y] = (halo_dim_0, 0, p % tile_y)
-                for p in range(padd_y):
-                    halo_tile_x = out_i if p < tile_x else out_i + 1
-                    halo_tile_y = out_j + 1
-                    halo_tile_idx = halo_tile_x * num_tile_y + halo_tile_y
-                    halo_dim_0 = halo_tile_idx * z + k if halo_tile_x < num_tile_x and halo_tile_y < num_tile_y else -1
-                    halo_y[dim_0][p % tile_x] = (halo_dim_0, p % tile_x, 0)
+                if stencil_type == 0: # Star7P
+                    # Star7P: padd_x = padd_y = base
+                    for p in range(padd_x):
+                        halo_tile_x = out_i + 1
+                        halo_tile_y = out_j if p < tile_y else out_j + 1
+                        halo_tile_idx = halo_tile_x * num_tile_y + halo_tile_y
+                        halo_dim_0 = halo_tile_idx * z + k if halo_tile_x < num_tile_x and halo_tile_y < num_tile_y else -1
+                        halo_x[dim_0][p] = (halo_dim_0, 0, p % tile_y)
 
-    data = { "size": (x, y, z), "A": matrix_value, "diag_A": matrix_diag, "b": right_hand_side, "ijk": vec_index,
+                        if halo_dim_0 >= 0:
+                            b_valid[halo_x[dim_0][p]] += (1 << 1) # out_i
+
+                    for p in range(padd_y):
+                        halo_tile_x = out_i
+                        halo_tile_y = out_j + 1
+                        halo_tile_idx = halo_tile_x * num_tile_y + halo_tile_y
+                        halo_dim_0 = halo_tile_idx * z + k if halo_tile_x < num_tile_x and halo_tile_y < num_tile_y else -1
+                        halo_y[dim_0][p] = (halo_dim_0, p % tile_x, 0)
+
+                        if halo_dim_0 >= 0:
+                            b_valid[halo_y[dim_0][p]] += 1 # out_j
+
+                elif stencil_type == 1: # Star13P
+                    # in和agg交替映射 halo_x[0]->in, halo_x[1]->agg, ...
+                    # padd_x = padd_y = 2 * base
+                    for p in range(padd_x):
+                        halo_tile_x = out_i + 1
+                        halo_tile_y = out_j
+                        halo_tile_idx = halo_tile_x * num_tile_y + halo_tile_y
+                        halo_dim_0 = halo_tile_idx * z + k if halo_tile_x < num_tile_x and halo_tile_y < num_tile_y else -1
+                        halo_x[dim_0][p] = (halo_dim_0, p % 2, (p // 2) % tile_y)
+
+                        if halo_dim_0 >= 0:
+                            if p % 2 == 0:
+                                b_valid[halo_x[dim_0][p]] += (1 << 1) # out_i
+                            else:
+                                b_valid[halo_x[dim_0][p]] += (1 << 2) # agg_i
+
+                    for p in range(padd_y):
+                        halo_tile_x = out_i
+                        halo_tile_y = out_j + 1
+                        halo_tile_idx = halo_tile_x * num_tile_y + halo_tile_y
+                        halo_dim_0 = halo_tile_idx * z + k if halo_tile_x < num_tile_x and halo_tile_y < num_tile_y else -1
+                        halo_y[dim_0][p] = (halo_dim_0, (p // 2) % tile_x, p % 2)
+
+                        if halo_dim_0 >= 0:
+                            if p % 2 == 0:
+                                b_valid[halo_y[dim_0][p]] += 1 # out_j
+                            else:
+                                b_valid[halo_y[dim_0][p]] += (1 << 3) # agg_j
+
+                elif stencil_type == 2: # diamond13P
+                    # Diamond13P: padd_x = base + 1, padd_y = base
+                    for p in range(padd_x):
+                        halo_tile_x = out_i + 1
+                        halo_tile_y = out_j if p < tile_y else out_j + 1
+                        halo_tile_idx = halo_tile_x * num_tile_y + halo_tile_y
+                        halo_dim_0 = halo_tile_idx * z + k if halo_tile_x < num_tile_x and halo_tile_y < num_tile_y else -1
+                        halo_x[dim_0][p] = (halo_dim_0, 0, p % tile_y)
+
+                        if halo_dim_0 >= 0:
+                            if p == 0: # out_i
+                                b_valid[halo_x[dim_0][p]] += (1 << 1)
+                            elif p == tile_y: # agg_i
+                                b_valid[halo_x[dim_0][p]] += (1 << 2)
+                            else: # out_i & agg_i
+                                b_valid[halo_x[dim_0][p]] += ((1 << 2) + (1 << 1))
+
+                    for p in range(padd_y):
+                        halo_tile_x = out_i
+                        halo_tile_y = out_j + 1
+                        halo_tile_idx = halo_tile_x * num_tile_y + halo_tile_y
+                        halo_dim_0 = halo_tile_idx * z + k if halo_tile_x < num_tile_x and halo_tile_y < num_tile_y else -1
+                        halo_y[dim_0][p] = (halo_dim_0, p % tile_x, 0)
+
+                        if halo_dim_0 >= 0:
+                            b_valid[halo_y[dim_0][p]] += 1 # out_j
+
+                elif stencil_type == 3: # Box27P
+                    # in和agg交替映射 halo_y[0]->in, halo_y[1]->agg, ...
+                    # padd_x = base + 1, padd_y = 2 * base
+                    for p in range(padd_x):
+                        halo_tile_x = out_i + 1
+                        halo_tile_y = out_j if p < tile_y else out_j + 1
+                        halo_tile_idx = halo_tile_x * num_tile_y + halo_tile_y
+                        halo_dim_0 = halo_tile_idx * z + k if halo_tile_x < num_tile_x and halo_tile_y < num_tile_y else -1
+                        halo_x[dim_0][p] = (halo_dim_0, 0, p % tile_y)
+
+                        if halo_dim_0 >= 0:
+                            if p == 0: # out_i
+                                b_valid[halo_x[dim_0][p]] += (1 << 1)
+                            elif p == tile_y: # agg_i
+                                b_valid[halo_x[dim_0][p]] += (1 << 2)
+                            else: # out_i & agg_i
+                                b_valid[halo_x[dim_0][p]] += ((1 << 2) + (1 << 1))
+
+                    for p in range(padd_y):
+                        halo_tile_x = out_i if p < 2 * tile_x else out_i + 1
+                        halo_tile_y = out_j + 1
+                        halo_tile_idx = halo_tile_x * num_tile_y + halo_tile_y
+                        halo_dim_0 = halo_tile_idx * z + k if halo_tile_x < num_tile_x and halo_tile_y < num_tile_y else -1
+                        halo_y[dim_0][p] = (halo_dim_0, ((p + 1) // 2) % tile_x, p % 2)
+
+                        if halo_dim_0 >= 0:
+                            if p % 2 == 0:
+                                b_valid[halo_y[dim_0][p]] += 1 # out_j
+                            else:
+                                b_valid[halo_y[dim_0][p]] += (1 << 3) # agg_j
+
+    data = { "size": (x, y, z), "A": matrix_value, "diag_A": matrix_diag, "b": right_hand_side,
+                                "b_valid": b_valid, "ijk": vec_index,
                                 "halo_x": halo_x, "halo_y": halo_y, "x": np.zeros((x,y,z), dtype=object) }
     return data

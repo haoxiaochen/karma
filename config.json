@@ -3,20 +3,13 @@
     "NumDims": 3,
     "Freq": 0.5,
     "Arch": {
-<<<<<<< HEAD
         "NumPEs": [4, 4],
         "VecLanes": 3,
         "AggAdders": 2,
         "HaloLanes": [4, 4]
-=======
-        "NumPEs": [8, 8],
-        "VecLanes": 3,
-        "AggAdders": 2,
-        "HaloLanes": [8, 8]
->>>>>>> 4e07033e63d63fdff7c4d8ff0bf0839e6edb786a
     },
     "Mem": {
-        "Depth": 8,
+        "Depth": 7,
         "DRAM_BW": 115,
         "DomainMtx_BW": 128,
         "DomainVec_BW": 128,

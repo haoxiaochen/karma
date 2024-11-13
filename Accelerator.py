@@ -17,7 +17,7 @@ class DomainData:
         self.tile_X = cfg["Arch"]["NumPEs"][0]
         self.tile_Y = cfg["Arch"]["NumPEs"][1]
         self.Z_depth = self.cfg["Mem"]["Depth"]
-        self.dim0_extent = math.prod(self.size) / (self.tile_X * self.tile_Y)
+        self.dim0_extent = math.ceil(self.size[0] / self.tile_X) * math.ceil(self.size[1] / self.tile_Y) * int(self.size[2])
         self.iters = math.ceil(self.dim0_extent / self.Z_depth)
         # double buffering with the size of 2*depth
         self.domain_vec_in = [[simpy.Store(env, capacity=2*self.Z_depth) for _ in range(self.tile_Y)] for _ in range(self.tile_X)]
@@ -25,8 +25,11 @@ class DomainData:
         self.domain_mtx = [[simpy.Store(env, capacity=2*self.Z_depth) for _ in range(self.tile_Y)] for _ in range(self.tile_X)]
         self.domain_diag_mtx = [[simpy.Store(env, capacity=2*self.Z_depth) for _ in range(self.tile_Y)] for _ in range(self.tile_X)]
         self.domain_index = [[simpy.Store(env, capacity=2*self.Z_depth) for _ in range(self.tile_Y)] for _ in range(self.tile_X)]
+
+        self.domain_dim0_idx = [[simpy.Store(env, capacity=2*self.Z_depth) for _ in range(self.tile_Y)] for _ in range(self.tile_X)]
         # index
-        self.dim0_idx = 0
+        self.put_dim0_idx = 0
+        self.read_dim0_idx = 0
 
     def get_read_size(self):
         access_size = (self.tile_X * self.tile_Y) * self.Z_depth
@@ -39,24 +42,33 @@ class DomainData:
 
     def get_previous(self):
         # Get x from the current execution
-        for d in range(self.Z_depth):
+        for _ in range(int(min(self.Z_depth, self.dim0_extent - self.read_dim0_idx))):
             for i in range(self.tile_X):
                 for j in range(self.tile_Y):
-                    value, index = yield self.domain_vec_out[i][j].get()
-                    self.data["x"][index] = value
-                    logger.trace(f"(Cycle {self.env.now}) DomainData: get x{index}={value} from PE({i}, {j})")
+                    value, ijk_index = yield self.domain_vec_out[i][j].get()
+                    if ijk_index[0] < self.size[0] and ijk_index[1] < self.size[1] and \
+                        ijk_index[2] < self.size[2]:
+                        self.data["x"][ijk_index] = value
+                        logger.trace(f"(Cycle {self.env.now}) DomainData: get x{ijk_index}={value} from PE({i}, {j})")
+                    else:
+                        logger.trace(f"(Cycle {self.env.now}) DomainData: get out-of-bound x{ijk_index}={value} from PE({i}, {j}), ignored")
+            self.read_dim0_idx += 1
 
     def put_next(self):
         # Put data for the next execution
-        for _ in range(self.Z_depth):
+        for _ in range(int(min(self.Z_depth, self.dim0_extent - self.put_dim0_idx))):
             for i in range(self.tile_X):
                 for j in range(self.tile_Y):
-                    yield self.domain_vec_in[i][j].put(self.data["b"][self.dim0_idx][i][j])
-                    yield self.domain_mtx[i][j].put(self.data["A"][self.dim0_idx][i][j])
-                    yield self.domain_diag_mtx[i][j].put(self.data["diag_A"][self.dim0_idx][i][j])
-                    yield self.domain_index[i][j].put(self.data["ijk"][self.dim0_idx][i][j])
-                    logger.trace(f"(Cycle {self.env.now}) DomainData: put data of row {self.data['ijk'][self.dim0_idx][i][j]} to PE({i}, {j})")
-            self.dim0_idx += 1
+                    # wait until b is valid (on halo and wholly updated by HEU)
+                    while self.data["b_valid"][self.put_dim0_idx][i][j] > 0:
+                        yield self.env.timeout(1)
+                    yield self.domain_vec_in[i][j].put(self.data["b"][self.put_dim0_idx][i][j])
+                    yield self.domain_mtx[i][j].put(self.data["A"][self.put_dim0_idx][i][j])
+                    yield self.domain_diag_mtx[i][j].put(self.data["diag_A"][self.put_dim0_idx][i][j])
+                    yield self.domain_index[i][j].put(self.data["ijk"][self.put_dim0_idx][i][j])
+                    yield self.domain_dim0_idx[i][j].put(self.put_dim0_idx)
+                    logger.trace(f"(Cycle {self.env.now}) DomainData: put data of row {self.data['ijk'][self.put_dim0_idx][i][j]} to PE({i}, {j})")
+            self.put_dim0_idx += 1
 
 class HaloData:
     def __init__(self, env, cfg, data, position): # X:0, Y:1
@@ -69,7 +81,8 @@ class HaloData:
         self.tile_X = cfg["Arch"]["NumPEs"][0]
         self.tile_Y = cfg["Arch"]["NumPEs"][1]
         self.Z_depth = self.cfg["Mem"]["Depth"]
-        self.dim0_extent = math.prod(self.size) / (self.tile_X * self.tile_Y)
+
+        self.dim0_extent = math.ceil(self.size[0] / self.tile_X) * math.ceil(self.size[1] / self.tile_Y) * int(self.size[2])
         self.iters = math.ceil(self.dim0_extent / self.Z_depth)
         self.halo_points = get_num_halo_points(cfg["StencilType"], cfg["NumDims"], position, self.tile_Y if position==0 else self.tile_X)
         # double buffering with the size of 2*depth
@@ -78,7 +91,9 @@ class HaloData:
         self.halo_vec_out = [simpy.Store(env, capacity=2*self.Z_depth) for _ in range(self.halo_points)]
         self.halo_idx_out = [simpy.Store(env, capacity=2*self.Z_depth) for _ in range(self.halo_points)]
         # index
-        self.dim0_idx = 0
+        self.put_dim0_idx = 0
+        self.read_dim0_idx = 0
+        self.stencil_type = cfg["StencilType"]
 
     def get_read_size(self):
         return self.halo_points * self.Z_depth
@@ -87,27 +102,70 @@ class HaloData:
         return self.halo_points * self.Z_depth
 
     def get_previous(self):
-        # Get updated b from the current execution
-        for _ in range(self.Z_depth):
+        for _ in range(int(min(self.Z_depth, self.dim0_extent - self.read_dim0_idx))):
             for i in range(self.halo_points):
-                value, index = yield self.halo_vec_out[i].get()
+                value, index, out_flag, agg_flag = yield self.halo_vec_out[i].get()
                 ijk_index = yield self.halo_idx_out[i].get()
                 if index[0] >= 0:
                     self.data["b"][index] = value
-                    logger.trace(f"(Cycle {self.env.now}) HaloData: get b{ijk_index}={value} from HEU ({self.position}, {i})")
+                    if self.position == 0: # out_i | agg_i
+                        self.data["b_valid"][index] -= ((out_flag << 1) + (agg_flag << 2))
+                    else: # out_j | agg_j
+                        self.data["b_valid"][index] -= (out_flag + (agg_flag << 3))
+                    logger.trace(f"(Cycle {self.env.now}) HaloData: get b{ijk_index}={value} from HEU ({self.position}, {i}) with valid state={bin(self.data["b_valid"][index])}")
+            self.read_dim0_idx += 1
 
     def put_next(self):
-        # Put b for the next execution
-        for _ in range(self.Z_depth):
+        for _ in range(int(min(self.Z_depth, self.dim0_extent - self.put_dim0_idx))):
             for i in range(self.halo_points):
                 halo = "halo_x" if self.position == 0 else "halo_y"
-                index = self.data[halo][self.dim0_idx][i]
+                index = self.data[halo][self.put_dim0_idx][i]
+
+                # b_valid共4bit，bit[0]表示需要通过out_j更新，bit[1]表示需要通过out_i更新
+                # bit[2]表示需要通过agg_i更新，bit[3]表示需要通过agg_j更新
+                # 优先级从高bit到低bit，这是按列优先的调度顺序决定的
+                # agg_j agg_i out_i out_j
+                if index[0] >= 0:
+                    if self.stencil_type == 0: # out_i -> out_j
+                        if self.position == 1: # out_j
+                            while self.data["b_valid"][index] & 0b0010 != 0: # wait out_i
+                                yield self.env.timeout(1)
+
+                    elif self.stencil_type == 1: # (agg_i | out_i) -> (agg_j | out_j)
+                        if self.position == 1: # (agg_j | out_j)
+                            while self.data["b_valid"][index] & 0b0110 != 0: # wait agg_i & out_i
+                                yield self.env.timeout(1)
+
+                    elif self.stencil_type == 2: # agg_i -> out_i -> out_j
+                        if self.position == 0 and i == 0: # out_i
+                            while self.data["b_valid"][index] & 0b0100 != 0: # wait agg_i
+                                yield self.env.timeout(1)
+                        elif self.position == 1: # out_j
+                            while self.data["b_valid"][index] & 0b0110 != 0: # wait agg_i & out_i
+                                yield self.env.timeout(1)
+
+                    elif self.stencil_type == 3: # agg_j -> agg_i -> out_i -> out_j
+                        if self.position == 0 and i == 0: # out_i
+                            while self.data["b_valid"][index] & 0b1100 != 0: # wait agg_i & agg_j
+                                yield self.env.timeout(1)
+                        elif self.position == 0 and i != 0: # agg_i
+                            while self.data["b_valid"][index] & 0b1000 != 0: # wait agg_j
+                                yield self.env.timeout(1)
+                        elif self.position == 1 and i % 2 == 0: # out_j
+                            while self.data["b_valid"][index] & 0b1110 != 0: # wait agg_ij & out_i
+                                yield self.env.timeout(1)
+
                 value = self.data["b"][index]
                 ijk = self.data["ijk"][index]
                 yield self.halo_vec_in[i].put((value, index))
                 yield self.halo_idx_in[i].put(ijk)
-                logger.trace(f"(Cycle {self.env.now}) HaloData: put b{ijk}={value} to HEU ({self.position}, {i})")
-            self.dim0_idx += 1
+                if index[0] >= 0:
+                    logger.trace(f"(Cycle {self.env.now}) HaloData: put b{ijk}={value} to HEU ({self.position}, {i}) with valid state={bin(self.data["b_valid"][index])}")
+                else:
+                    logger.trace(f"(Cycle {self.env.now}) HaloData: put invalid b to HEU ({self.position}, {i}) with valid state={bin(self.data["b_valid"][index])}")
+
+            self.put_dim0_idx += 1
+
 
 class Accelerator:
     def __init__(self, env, cfg, data, progressbar=False):
@@ -142,13 +200,15 @@ class Accelerator:
         if self.progressbar: bar.start()
         while True:
             yield self.env.timeout(1)  # Simulate processing time
-            if self.progressbar: bar.update(self.domain_data.dim0_idx)
+            if self.progressbar: bar.update(self.domain_data.read_dim0_idx)
 
     def check_correctness(self):
         for i in range(self.data["size"][0]):
             for j in range(self.data["size"][1]):
                 for k in range(self.data["size"][2]):
-                    if self.data["x"][i][j][k] != 1.0: return False
+                    if self.data["x"][i][j][k] != 1.0:
+                        # print(f"{i}, {j}, {k}, {self.data["x"][i][j][k]}")
+                        return False
         return True
 
     def print(self):
