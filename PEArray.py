@@ -28,11 +28,12 @@ class BoundaryPorts:
         self.agg_out = simpy.Store(env, capacity=1)
 
 class PE:
-    def __init__(self, env, cfg, bufs, data, ports, i, j):
+    def __init__(self, env, cfg, bufs, data, spmat_data, ports, i, j):
         self.env = env
         self.cfg = cfg
         self.bufs = bufs
         self.data = data
+        self.spmat_data = spmat_data
         self.ports = ports
         self.stencil_type = cfg["StencilType"]
         self.dims = cfg["NumDims"]
@@ -77,6 +78,8 @@ class PE:
             tick = self.env.now
             yield self.env.process(self.bufs.domain_vec_in.access(1))
             yield self.env.process(self.bufs.domain_diag_mtx.access(1))
+            logger.info(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) ScalarUnit: get aii, ijk_index access ready takes {self.env.now - tick} cycles")
+
 
             aii = yield self.data.domain_diag_mtx[self.i][self.j].get()
             ijk_index = yield self.data.domain_index[self.i][self.j].get()
@@ -117,13 +120,32 @@ class PE:
                     [1, 4, 2, 5, 0, 3],
                     [4, 5, 2, 3, 1, 0],
                     [10, 11, 12, 6, 8, 9, 1, 3, 5, 7, 4, 2, 0]]
-
+        dim0_index = 0
+        # stall = False
+        # vec_A = []
         while True:
             tick = self.env.now
-            new_x, ijk_index = yield self.new_x.get()
+            # if not stall:
+            #     yield self.env.process(self.bufs.domain_mtx.access(self.num_points))
+            #     vec_A = yield self.spmat_data.domain_mtx[self.i][self.j].get()
+            #     cnt += 1
+            #     stall = False
+
+            # if ((cnt - 1) // self.data.size[2]) > ((cnt - 2) // self.data.size[2]): # at boundary, insert bubble
+            #     new_x, ijk_index = 0, (0, 0, 0)
+            #     stall = True
+            # elif cnt < self.data.dim0_extent:
+            #     new_x, ijk_index = yield self.new_x.get()
+            # else:
+            #     new_x, ijk_index = 0, (0, 0, 0)
+
+            if dim0_index < self.data.dim0_extent:
+                new_x, ijk_index = yield self.new_x.get()
+            else:
+                new_x, ijk_index = 0, (0, 0, 0)
+
             yield self.env.process(self.bufs.domain_mtx.access(self.num_points))
-            vec_A = yield self.data.domain_mtx[self.i][self.j].get()
-            assert(len(vec_A) == self.num_points)
+            vec_A = yield self.spmat_data.domain_mtx[self.i][self.j].get()
 
             logger.trace(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) VectorUnit: get data ready takes {self.env.now - tick} cycles")
 
@@ -139,6 +161,7 @@ class PE:
             # schedule
             lanes = self.cfg["Arch"]["VecLanes"]
             sche_cycles = (self.num_points + lanes - 1) // lanes
+            mul_points = 0
             for i in range(sche_cycles):
                 # pipeline
                 if i == 0:
@@ -152,13 +175,23 @@ class PE:
                     if id >= self.num_points:
                         break
                     sche_id = sche_seq[self.stencil_type][id]
-                    yield self.vec_results[sche_id].put(vec_x[sche_id] * vec_A[sche_id])
-                    sche_ids.append(sche_id)
+
+                    z = self.data.size[2]
+                    offset = self.z_offset[self.stencil_type][sche_id] - self.id2stage[sche_id]
+                    z_target = dim0_index + offset
+                    if z_target >= 0 and z_target < self.data.dim0_extent and \
+                        (offset <= 0 or z_target % z != 0):
+                        yield self.vec_results[sche_id].put(vec_x[sche_id] * vec_A[sche_id])
+                        sche_ids.append(sche_id)
+                        mul_points += 1
+                    else:
+                        sche_ids.append(-1)
 
                 logger.debug(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) VectorUnit: veclen={len(sche_ids)} terms={sche_ids} with shift_x={self.shift_x}, vec_A={vec_A}")
 
-            self.mul_counter += self.num_points
+            self.mul_counter += mul_points
             logger.trace(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) VectorUnit: one iteration takes {self.env.now - tick} cycles")
+            dim0_index += 1
 
     def Aggregator(self):
         # bind name to port for debugging
@@ -172,66 +205,78 @@ class PE:
         vec_results = [(self.vec_results[i], f"term[{i}]") for i in range(self.num_points)]
 
         # generate adder & buf processes
+        self.dim0_index = 0
         while True:
             tick = self.env.now
-            # logger.trace(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) Aggregator: get data ready takes {self.env.now - tick} cycles")
             self.agg_ijk_index = yield self.ijk_index.get()
-            self.dim0_index = yield self.data.domain_dim0_idx[self.i][self.j].get()
+            logger.trace(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) Aggregator: get data ready takes {self.env.now - tick} cycles")
 
             if self.dims == 3:
                 # A_vec_target [(0, 0, 1), (0, 1, 0), (1, 0, 0)]
                 if self.stencil_type == 0: # Star7P
-                    out_i_proc = self.env.process(self.buf(vec_results[2], out_i))
-                    out_j_proc = self.env.process(self.buf(vec_results[1], out_j))
-                    rk_proc = self.env.process(self.buf(vec_results[0], rk))
+                    out_i_proc = self.env.process(self.buf(vec_results[2], out_i, 0))
+                    out_j_proc = self.env.process(self.buf(vec_results[1], out_j, 0))
+                    rk_proc = self.env.process(self.buf(vec_results[0], rk, 1))
                     yield out_i_proc & out_j_proc & rk_proc
 
                 # A_vec_target [(0, 0, 1), (1, 0, 0), (0, 1, 0), (0, 0, 1), (2, 0, -1), (0, 2, -1)]
                 elif self.stencil_type == 1: # Star13P
-                    out_i_proc = self.env.process(self.adder([agg_in_i, vec_results[1]], out_i))
-                    out_j_proc = self.env.process(self.adder([agg_in_j, vec_results[2]], out_j))
-                    rk_proc = self.env.process(self.adder([vec_results[0], vec_results[3]], rk))
-                    agg_out_i_proc = self.env.process(self.buf(vec_results[4], agg_out_i))
-                    agg_out_j_proc = self.env.process(self.buf(vec_results[5], agg_out_j))
+                    out_i_proc = self.env.process(self.adder([agg_in_i, vec_results[1]], out_i, 0))
+                    out_j_proc = self.env.process(self.adder([agg_in_j, vec_results[2]], out_j, 0))
+                    rk_proc = self.env.process(self.adder([vec_results[0], vec_results[3]], rk, 1))
+                    agg_out_i_proc = self.env.process(self.buf(vec_results[4], agg_out_i, -1))
+                    agg_out_j_proc = self.env.process(self.buf(vec_results[5], agg_out_j, -1))
                     yield out_i_proc & out_j_proc & rk_proc & agg_out_i_proc & agg_out_j_proc
 
                 # A_vec_target [(0, 0, 1), (1, 0, 0), (0, 1, 0),
                 #               (0, 1, 0), (1, 1, -1),
                 #               (1, 1, -1)]
                 elif self.stencil_type == 2: # diamond13P
-                    out_i_proc = self.env.process(self.buf(vec_results[1], out_i))
-                    out_j_proc = self.env.process(self.adder([agg_in_i, vec_results[2], vec_results[3]], out_j))
-                    rk_proc = self.env.process(self.buf(vec_results[0], rk))
-                    agg_out_i_proc = self.env.process(self.adder([vec_results[4], vec_results[5]], agg_out_i))
-                    yield out_i_proc & out_j_proc & rk_proc & agg_out_j_proc
+                    out_i_proc = self.env.process(self.buf(vec_results[1], out_i, 0))
+                    out_j_proc = self.env.process(self.adder([agg_in_i, vec_results[2], vec_results[3]], out_j, 0))
+                    rk_proc = self.env.process(self.buf(vec_results[0], rk, 1))
+                    agg_out_i_proc = self.env.process(self.adder([vec_results[4], vec_results[5]], agg_out_i, -1))
+                    yield out_i_proc & out_j_proc & rk_proc & agg_out_i_proc
 
                 # A_vec_target [(0, 0, 1), (1, 0, 0), (0, 1, 0),
                 #               (0, 1, 0), (1, 0, 0),
                 #               (0, 1, 0), (1, 1, -1), (1, 0, 0),
-                #               (1, 1, -1),
+                #               (1, 1, -1),use aggr
                 #               (1, 1, -1), (1, 2, -2),
                 #               (1, 2, -2),
                 #               (1, 2, -2)]
                 elif self.stencil_type == 3: # box27P
-                    out_i_proc = self.env.process(self.adder([vec_results[1], vec_results[4], vec_results[7]], out_i))
-                    out_j_proc = self.env.process(self.adder([agg_in_i, vec_results[2], vec_results[3], vec_results[5]], out_j))
-                    agg_out_i_proc = self.env.process(self.adder([agg_in_j, vec_results[6], vec_results[8], vec_results[9]], agg_out_i))
-                    agg_out_j_proc = self.env.process(self.adder([vec_results[10], vec_results[11], vec_results[12]], agg_out_j))
-                    rk_proc = self.env.process(self.buf(vec_results[0], rk))
+                    out_i_proc = self.env.process(self.adder([vec_results[1], vec_results[4], vec_results[7]], out_i, 0))
+                    out_j_proc = self.env.process(self.adder([agg_in_i, vec_results[2], vec_results[3], vec_results[5]], out_j, 0))
+                    agg_out_i_proc = self.env.process(self.adder([agg_in_j, vec_results[6], vec_results[8], vec_results[9]], agg_out_i, -1))
+                    agg_out_j_proc = self.env.process(self.adder([vec_results[10], vec_results[11], vec_results[12]], agg_out_j, -2))
+                    rk_proc = self.env.process(self.buf(vec_results[0], rk, 1))
                     yield out_i_proc & out_j_proc & rk_proc & agg_out_i_proc & agg_out_j_proc
             else:
                 pass
 
             logger.trace(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) Aggregator: one iteration takes {self.env.now - tick} cycles")
-
+            self.dim0_index += 1
 
     # inputs [(port, name)] output (port, name)
-    def adder(self, inputs, output):
+    def adder(self, inputs, output, z_target_offset):
         assert(self.agg_ijk_index[0] != -1)
+        output_port, output_name = output
+
+        z = self.data.size[2]
+        z_target = self.dim0_index + z_target_offset
+        if z_target_offset > 0 and \
+             (z_target % z == 0 or \
+             (z_target >= self.data.dim0_extent)): # 下传上，不在同一个tile则舍弃
+            logger.debug(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) Aggregator: index={self.agg_ijk_index}, useless output to {output_name} is ignored")
+            return
+        elif z_target < 0 or z_target >= self.data.dim0_extent: # 上传下，若目标坐标为负数，舍弃
+            logger.debug(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) Aggregator: z_target={z_target}, index={self.agg_ijk_index}, useless output to {output_name} is ignored")
+            return
+
         sum = 0
         add_n = 0
         input_str = ""
-        output_port, output_name = output
         for in_port, in_name in inputs:
             if (in_name == "agg_in_i" and self.i == 0) or (in_name == "agg_in_j" and self.j == 0):
                 continue
@@ -251,60 +296,99 @@ class PE:
             #         sum += input_data
             #         input_str += (in_name + "+")
             #         add_n += 1
-            if (in_name.startswith("term")):
-                id = self.term_id_dict[in_name]
-                cur_z_index = self.dim0_index - self.id2stage[id]
-                target_z_index = cur_z_index + self.z_offset[self.stencil_type][id]
-
-                if target_z_index < 0:
-                    yield in_port.get()
-                    continue
-
+            # if (in_name.startswith("term")):
+            #     id = self.term_id_dict[in_name]
+            #     cur_z_index = self.dim0_index - self.id2stage[id]
+            #     target_z_index = cur_z_index + self.z_offset[self.stencil_type][id]
+            #     logger.debug(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) Aggregator: output_name={output_name} agg_index={self.agg_ijk_index} target_z={target_z_index}")
+            #     if target_z_index < 0:
+            #         yield in_port.get()
+            #         continue
             input_data = yield in_port.get()
             sum += input_data
             input_str += (in_name + "+")
             add_n += 1
 
-        if output_name != 'R_k' or self.agg_ijk_index[2] != self.data.size[2] - 1:
-            if add_n >= 2:
-                yield self.env.timeout(self.cfg['Delay']['Add'])
-            yield output_port.put(sum)
-            self.add_counter += add_n - 1
-            logger.debug(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) agg_index: {self.agg_ijk_index} Aggregator: pass {input_str}={sum} through {output_name}")
-        else:
-            # pass
-            logger.debug(f"Aggregator: Put nothing to the outport, Output name: {output_name}, {self.agg_ijk_index[2]}")
+        if add_n >= 2:
+            yield self.env.timeout(self.cfg['Delay']['Add'])
+        logger.debug(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) Aggregator: waiting for output port={output_name} to be available")
+        yield output_port.put(sum)
+        if output_name == "out_j":
+            yield self.ports.out_j_ijk.put(self.agg_ijk_index)
+        elif output_name == "out_i":
+            yield self.ports.out_i_ijk.put(self.agg_ijk_index)
+        self.add_counter += add_n - 1
+        logger.debug(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) Aggregator: add_n={add_n} agg_index={self.agg_ijk_index}, pass {input_str}={sum} through {output_name}")
 
-    def buf(self, input, output):
+        # if output_name != 'R_k' or self.agg_ijk_index[2] != self.data.size[2] - 1:
+        #     if add_n >= 2:
+        #         yield self.env.timeout(self.cfg['Delay']['Add'])
+        #     yield output_port.put(sum)
+        #     if output_name == "out_j":
+        #         yield self.ports.out_j_ijk.put(self.agg_ijk_index)
+        #     elif output_name == "out_i":
+        #         yield self.ports.out_i_ijk.put(self.agg_ijk_index)
+        #     self.add_counter += add_n - 1
+        #     logger.debug(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) Aggregator: add_n={add_n} agg_index={self.agg_ijk_index}, pass {input_str}={sum} through {output_name}")
+        # else:
+        #     # pass
+        #     logger.debug(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) Aggregator: index {self.agg_ijk_index} useless output to {output_name} is ignored")
+
+    def buf(self, input, output, z_target_offset):
         input_port, input_name = input
         output_port, output_name = output
-        input_data = yield input_port.get()
+        z = self.data.size[2]
 
-        if output_name != 'R_k' or self.agg_ijk_index[2] != self.data.size[2] - 1:
-            yield output_port.put(input_data)
-            if output_name == "out_j":
-                yield self.ports.out_j_ijk.put(self.agg_ijk_index)
-            elif output_name == "out_i":
-                yield self.ports.out_i_ijk.put(self.agg_ijk_index)
-            logger.debug(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) agg_index: {self.agg_ijk_index} Aggregator: pass {input_name}={input_data} through {output_name}")
-        else:
-            logger.debug(f"Aggregator: Put nothing to the outport, Output name: {output_name}, {self.agg_ijk_index[2]}")
+        z_target = self.dim0_index + z_target_offset
+        if z_target_offset > 0 and \
+            (z_target % z == 0 or \
+             (z_target >= self.data.dim0_extent)): # 下传上，不在同一个tile则舍弃
+            logger.debug(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) Aggregator: index={self.agg_ijk_index}, useless output to {output_name} is ignored")
+            return
+        elif z_target < 0 or z_target >= self.data.dim0_extent: # 上传下，若目标坐标为负数，舍弃
+            logger.debug(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) Aggregator: index={self.agg_ijk_index}, useless output to {output_name} is ignored")
+            return
+
+        # if (output_name == 'R_k' and self.agg_ijk_index[2] == self.data.size[2] - 1):
+        #     logger.debug(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) Aggregator: index {self.agg_ijk_index}, useless output to R_k is ignored")
+        #     return
+        # elif self.dim0_index // z != (self.dim0_index + z_target_offset) // z: # aggregator传的值不在同一个tile，舍弃
+        #     id = self.term_id_dict[input_name]
+        #     cur_z_index = self.dim0_index - self.id2stage[id]
+        #     target_z_index = cur_z_index + self.z_offset[self.stencil_type][id]
+        #     logger.debug(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) Aggregator: output_name={output_name} agg_index={self.agg_ijk_index} target_z={target_z_index}")
+
+        #     if target_z_index < 0:
+        #         logger.debug(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) Aggregator: index {self.agg_ijk_index[2]}, useless output to {output_name} is ignored")
+        #         return
+        input_data = yield input_port.get()
+        logger.debug(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) Aggregator: waiting for output port={output_name} to be available")
+        yield output_port.put(input_data)
+        if output_name == "out_j":
+            yield self.ports.out_j_ijk.put(self.agg_ijk_index)
+        elif output_name == "out_i":
+            yield self.ports.out_i_ijk.put(self.agg_ijk_index)
+
+        logger.debug(f"(Cycle {self.env.now}) PE({self.i}, {self.j}) agg_index: {self.agg_ijk_index} Aggregator: pass {input_name}={input_data} through {output_name}")
+
 
 class PEArray:
-    def __init__(self, env, cfg, bufs, data, boundaries):
+    def __init__(self, env, cfg, bufs, data, spmat_data, boundaries):
         self.env = env
         self.cfg = cfg
         self.data = data
+        self.spmat_data = spmat_data
         self.boundaries = boundaries
 
         self.num_PEs = cfg["Arch"]["NumPEs"]
         self.ports = [[PEPorts(env) for _ in range(self.num_PEs[1])] for _ in range(self.num_PEs[0])]
-        self.PEs = [[PE(env, cfg, bufs, data, self.ports[i][j], i, j) for j in range(self.num_PEs[1])] for i in range(self.num_PEs[0])]
+        self.PEs = [[PE(env, cfg, bufs, data, spmat_data, self.ports[i][j], i, j) for j in range(self.num_PEs[1])] for i in range(self.num_PEs[0])]
 
         self.actions = []
         for i in range(self.num_PEs[0]):
             for j in range(self.num_PEs[1]):
-                self.actions += [env.process(self.run_i(i, j)), env.process(self.run_j(i, j))]
+                self.actions += [env.process(self.trans_out_i(i, j)), env.process(self.trans_out_j(i, j)),
+                                 env.process(self.trans_agg_i(i, j)), env.process(self.trans_agg_j(i, j))]
 
     def stat(self):
         mul_counter = sum([pe.mul_counter for row in self.PEs for pe in row])
@@ -312,56 +396,57 @@ class PEArray:
         add_counter = sum([pe.add_counter for row in self.PEs for pe in row])
         return mul_counter, div_counter, add_counter
 
-    def run_i(self, i, j):
+    def trans_out_i(self, i, j):
         while True:
-            stencil_type = self.cfg["StencilType"]
-            use_agg_i = True if stencil_type == 2 else False    # Diamond
-
             out_i = yield self.ports[i][j].out_i.get()
-            if use_agg_i:
-                agg_out_i = yield self.ports[i][j].agg_out_i.get()
-            # yield self.env.timeout(1)  # Forward delay
-            # debug
             out_i_ijk = yield self.ports[i][j].out_i_ijk.get()
 
             if i != self.num_PEs[0]-1:
                 yield self.ports[i+1][j].in_i.put(out_i)
                 yield self.ports[i + 1][j].in_i_ijk.put(out_i_ijk)
                 logger.trace(f"(Cycle {self.env.now}) PEArray: pass from PE({i}, {j}) to PE({i+1}, {j}) through (out_i, in_i), out_i_ijk={out_i_ijk}")
-                if use_agg_i:
-                    yield self.ports[i+1][j].agg_in_i.put(agg_out_i)
-                    logger.trace(f"(Cycle {self.env.now}) PEArray: pass from PE({i}, {j}) to PE({i+1}, {j}) through (agg_out_i, agg_in_i)")
             else:
                 yield self.boundaries[0][j].out.put((out_i, out_i_ijk))
                 logger.trace(f"(Cycle {self.env.now}) PEArray: pass from PE({i}, {j}) to HEU (0, {j}) through out_i, out_i_ijk={out_i_ijk}")
-                if use_agg_i:
-                    yield self.boundaries[0][j].agg_out.put(agg_out_i)
-                    logger.trace(f"(Cycle {self.env.now}) PEArray: pass from PE({i}, {j}) to HEU (0, {j}) through agg_out_i")
 
-
-    def run_j(self, i, j):
+    def trans_agg_i(self, i, j):
+        stencil_type = self.cfg["StencilType"]
+        use_agg_i = False if stencil_type == 0 else True    # Star & Diamond & Box
+        if not use_agg_i:
+            return
         while True:
-            stencil_type = self.cfg["StencilType"]
-            use_agg_j = True if stencil_type == 3 else False    # Box
+            agg_out_i = yield self.ports[i][j].agg_out_i.get()
+            if i != self.num_PEs[0]-1:
+                yield self.ports[i+1][j].agg_in_i.put(agg_out_i)
+                logger.trace(f"(Cycle {self.env.now}) PEArray: pass from PE({i}, {j}) to PE({i+1}, {j}) through (agg_out_i, agg_in_i)")
+            else:
+                yield self.boundaries[0][j].agg_out.put(agg_out_i)
+                logger.trace(f"(Cycle {self.env.now}) PEArray: pass from PE({i}, {j}) to HEU (0, {j}) through agg_out_i")
 
-            out_j = yield self.ports[i][j].out_j.get()
-            if use_agg_j:
-                agg_out_j = yield self.ports[i][j].agg_out_j.get()
-            # yield self.env.timeout(1)  # Forward delay
-
-            # debug
+    def trans_out_j(self, i, j):
+        while True:
             out_j_ijk = yield self.ports[i][j].out_j_ijk.get()
+            out_j = yield self.ports[i][j].out_j.get()
 
             if j != self.num_PEs[1]-1:
                 yield self.ports[i][j+1].in_j.put(out_j)
                 yield self.ports[i][j + 1].in_j_ijk.put(out_j_ijk)
                 logger.trace(f"(Cycle {self.env.now}) PEArray: pass from PE({i}, {j}) to PE({i}, {j+1}) through (out_j, in_j), out_j_ijk={out_j_ijk}")
-                if use_agg_j:
-                    yield self.ports[i][j+1].agg_in_j.put(agg_out_j)
-                    logger.trace(f"(Cycle {self.env.now}) PEArray: pass from PE({i}, {j}) to PE({i}, {j+1}) through (agg_out_j, agg_in_j)")
             else:
                 yield self.boundaries[1][i].out.put((out_j, out_j_ijk))
                 logger.trace(f"(Cycle {self.env.now}) PEArray: pass from PE({i}, {j}) to HEU (1, {i}) through out_j, out_j_ijk={out_j_ijk}")
-                if use_agg_j:
-                    yield self.boundaries[1][i].agg_out.put(agg_out_j)
-                    logger.trace(f"(Cycle {self.env.now}) PEArray: pass from PE({i}, {j}) to HEU (1, {i}) through agg_out_j")
+
+    def trans_agg_j(self, i, j):
+        stencil_type = self.cfg["StencilType"]
+        use_agg_j = True if stencil_type == 1 or stencil_type == 3 else False    # Star & Box
+        if not use_agg_j:
+            return
+
+        while True:
+            agg_out_j = yield self.ports[i][j].agg_out_j.get()
+            if j != self.num_PEs[1]-1:
+                yield self.ports[i][j+1].agg_in_j.put(agg_out_j)
+                logger.trace(f"(Cycle {self.env.now}) PEArray: pass from PE({i}, {j}) to PE({i}, {j+1}) through (agg_out_j, agg_in_j)")
+            else:
+                yield self.boundaries[1][i].agg_out.put(agg_out_j)
+                logger.trace(f"(Cycle {self.env.now}) PEArray: pass from PE({i}, {j}) to HEU (1, {i}) through agg_out_j")

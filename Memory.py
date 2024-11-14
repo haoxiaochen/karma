@@ -46,6 +46,8 @@ class DRAM:
         logger.info(f"(Cycle {self.env.now}) DRAM: read {self.name} finished")
 
     def run_write(self):
+        if self.data.readonly:
+            return
         for i in range(self.data.iters):
             size = self.data.get_write_size()
             self.counter += size
@@ -59,9 +61,9 @@ class Buffers:
     def __init__(self, env, cfg):
         self.env = env
         self.cfg = cfg
-        self.domain_vec_in = SRAM(env, "domain_vec_in", cfg["Mem"]["DomainVec_BW"])
-        self.domain_vec_out = SRAM(env, "domain_vec_out", cfg["Mem"]["DomainVec_BW"])
-        self.domain_diag_mtx = SRAM(env, "domain_diag_mtx", cfg["Mem"]["DomainVec_BW"])
-        self.domain_mtx = SRAM(env, "domain_mtx", cfg["Mem"]["DomainMtx_BW"])
-        self.halo_vec_in = SRAM(env, "halo_vec_in", cfg["Mem"]["HaloVec_BW"])
-        self.halo_vec_out = SRAM(env, "halo_vec_out", cfg["Mem"]["HaloVec_BW"])
+        self.domain_vec_in = SRAM(env, "domain_vec_in", cfg["SRAM"]["DomainVec_BW"])
+        self.domain_vec_out = SRAM(env, "domain_vec_out", cfg["SRAM"]["DomainVec_BW"])
+        self.domain_diag_mtx = SRAM(env, "domain_diag_mtx", cfg["SRAM"]["DomainVec_BW"])
+        self.domain_mtx = SRAM(env, "domain_mtx", cfg["SRAM"]["DomainMtx_BW"])
+        self.halo_vec_in = SRAM(env, "halo_vec_in", cfg["SRAM"]["HaloVec_BW"])
+        self.halo_vec_out = SRAM(env, "halo_vec_out", cfg["SRAM"]["HaloVec_BW"])

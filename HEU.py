@@ -42,7 +42,7 @@ class HEU:
 
             elif self.stencil_type == 1: # Star
                 if i % 2 == 0:
-                    out = yield self.boundary_ports[i // 2].out.get()
+                    out, x_ijk = yield self.boundary_ports[i // 2].out.get()
                     out_flag = 1
                 else:
                     out = yield self.boundary_ports[i // 2].agg_out.get()
@@ -51,28 +51,28 @@ class HEU:
 
             elif self.stencil_type == 2: # Diamond
                 if self.position == 0: # HEU_X
-                    out = yield self.boundary_ports[i].out.get() if i != self.num_PEs[1] else 0
-                    agg_out = yield self.boundary_ports[i - 1].agg_out.get() if i != 0 else 0
+                    out, x_ijk = (yield self.boundary_ports[i].out.get()) if i != self.num_PEs[1] else (0, (0, 0, 0))
+                    agg_out = (yield self.boundary_ports[i - 1].agg_out.get()) if i != 0 else 0
 
                     out_flag = 1 if i != self.num_PEs[1] else 0
                     agg_flag = 1 if i != 0 else 0
                     self.add_counter += (agg_flag + out_flag)
                 else: # HEU_Y
-                    out = yield self.boundary_ports[i].out.get()
+                    out, x_ijk = yield self.boundary_ports[i].out.get()
                     out_flag = 1
                     self.add_counter += 1
 
             elif self.stencil_type == 3: # Box
                 if self.position == 0: # HEU_X
-                    out = yield self.boundary_ports[i].out.get() if i != self.num_PEs[1] else 0
-                    agg_out = yield self.boundary_ports[i - 1].agg_out.get() if i != 0 else 0
+                    out, x_ijk = (yield self.boundary_ports[i].out.get()) if i != self.num_PEs[1] else (0, (0, 0, 0))
+                    agg_out = (yield self.boundary_ports[i - 1].agg_out.get()) if i != 0 else 0
 
                     out_flag = 1 if i != self.num_PEs[1] else 0
                     agg_flag = 1 if i != 0 else 0
                     self.add_counter += (agg_flag + out_flag)
                 else: # HEU_Y
                     if i % 2 == 0:
-                        out = yield self.boundary_ports[i // 2].out.get()
+                        out, x_ijk = yield self.boundary_ports[i // 2].out.get()
                         out_flag = 1
                     else:
                         out = yield self.boundary_ports[i // 2].agg_out.get()
@@ -81,6 +81,7 @@ class HEU:
 
             # 对于index[0] < 0的无效值，需要先取走agg & in端口值，避免阻塞
             new_b = b_val - (out + agg_out)
+
             if b_idx[0] < 0:
                 yield self.env.process(self.bufs.halo_vec_out.access(1))
                 logger.trace(f"(Cycle {self.env.now}) HEU ({self.position}, {i}) waiting for output")

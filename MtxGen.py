@@ -27,10 +27,65 @@ def get_num_halo_points(stencil_type, dim, position, base):
     if stencil_type == 3:
         return base+1 if position == 0 else 2*base
 
-def get_linear_system(dim, stencil_type, x, y, z):
-    grid_size = x * y * z
-    stencil_points = []
+def get_affine_stencil_points(dim, stencil_type):
+    if stencil_type == 0:
+        # 3D-Star-7P/2D-Star-5P
+        if dim == 2:
+            stencil_points = [
+                (0, -1), (-1, 0),
+            ]
+        elif dim == 3:
+            stencil_points = [
+                (0, 0, -1), (0, -1, 0), (-1, 0, 0),
+            ]
+    elif stencil_type == 1:
+        # 3D-Star-13P/2D-Star-9P
+        if dim == 2:
+            stencil_points = [
+                (-1, 0), (0, -1),
+                (-2, 0), (0, -2),
+            ]
+        elif dim == 3:
+            stencil_points = [
+                (0, 0, -1), (-1, 0, 0), (0, -1, 0),
+                (0, 0, -2), (-2, 0, 0), (0, -2, 0),
+            ]
+    elif stencil_type == 2:
+        # 3D-Diamond-13P / 2D-Diamond-7P
+        if dim == 2:
+            stencil_points = [
+                (0, -1),
+                (-1, 0),
+                (-1, 1),
+            ]
+        elif dim == 3:
+            stencil_points = [
+                (0, 0, -1), (-1, 0, 0), (0, -1, 0),
+                (0, -1, -1), (-1, -1, 0),
+                (-1, -1, -1),
+            ]
+    elif stencil_type == 3:
+        # 3D-Box-27P / 2D-Box-9P
+        if dim == 2:
+            stencil_points = [
+                (-1, -1),
+                (0, -1),
+                (-1, 0),
+                (-1, 1),
+            ]
+        elif dim == 3:
+            stencil_points = [
+                (0, 0, -1), (-1, 0, 0), (0, -1, 0),
+                (0, -1, -1), (-1, 0, -1),
+                (0, -1, -2), (-1, -1, -1), (-1, 0, -2),
+                (-1, -1, -2),
+                (-1, -1, -3), (-1, -2, -2),
+                (-1, -2, -3),
+                (-1, -2, -4),
+            ]
+    return stencil_points
 
+def get_stencil_points(dim, stencil_type):
     if stencil_type == 0:
         # 3D-Star-7P/2D-Star-5P
         if dim == 2:
@@ -46,6 +101,7 @@ def get_linear_system(dim, stencil_type, x, y, z):
                 (0, 0, -1),
                 (0, -1, 0),
                 (-1, 0, 0),
+
                 (0, 0, 0),
                 (1, 0, 0),
                 (0, 1, 0),
@@ -67,12 +123,14 @@ def get_linear_system(dim, stencil_type, x, y, z):
             ]
         elif dim == 3:
             stencil_points = [
-                (0, 0, -2),
                 (0, 0, -1),
-                (0, -2, 0),
-                (0, -1, 0),
-                (-2, 0, 0),
                 (-1, 0, 0),
+                (0, -1, 0),
+
+                (0, 0, -2),
+                (-2, 0, 0),
+                (0, -2, 0),
+
                 (0, 0, 0),
                 (1, 0, 0),
                 (2, 0, 0),
@@ -96,18 +154,20 @@ def get_linear_system(dim, stencil_type, x, y, z):
         elif dim == 3:
             stencil_points = [
                 (0, 0, -1),
-                (1, 0, -1),
-                (0, 1, -1),
-                (0, -1, 0),
-                (1, -1, 0),
                 (-1, 0, 0),
+                (0, -1, 0),
+                (-1, 1, 0),
+                (-1, 0, 1),
+                (0, -1, 1),
+
+
                 (0, 0, 0),
                 (1, 0, 0),
-                (-1, 1, 0),
+                (1, -1, 0),
                 (0, 1, 0),
-                (0, -1, 1),
-                (-1, 0, 1),
                 (0, 0, 1),
+                (1, 0, -1),
+                (0, 1, -1),
             ]
     elif stencil_type == 3:
         # 3D-Box-27P / 2D-Box-9P
@@ -153,8 +213,14 @@ def get_linear_system(dim, stencil_type, x, y, z):
                 (0, 1, 1),
                 (1, 1, 1),
             ]
+    return stencil_points
+
+
+def get_linear_system(dim, stencil_type, x, y, z):
+    grid_size = x * y * z
+    stencil_points = get_affine_stencil_points(dim, stencil_type)
     stencil_length = len(stencil_points)
-    matrix_value = np.zeros((grid_size, stencil_length // 2))
+    matrix_value = np.zeros((grid_size, stencil_length))
     matrix_diag = np.zeros(grid_size)
     right_hand_side = np.ones(grid_size)
 
@@ -164,7 +230,7 @@ def get_linear_system(dim, stencil_type, x, y, z):
                 # only lower triangular
                 sum = 0
                 idx = k * y * z + j * z + i
-                for l in range(stencil_length // 2):
+                for l in range(stencil_length):
                     if dim == 2:
                         dx, dy = stencil_points[l]
                         dz = 0
@@ -174,8 +240,12 @@ def get_linear_system(dim, stencil_type, x, y, z):
                     y_new = j + dy
                     z_new = i + dz
                     idx_new = x_new * y * z + y_new * z + z_new
-                    if idx_new >= idx:
+                    if x_new >= 0 and x_new < x and \
+                        y_new >= 0 and y_new < y and \
+                        z_new >= 0 and z_new < z:
+
                         rand_num = -random.randint(1, 10)
+                        # rand_num = -1
                         matrix_value[idx_new][l] = rand_num
                         sum += rand_num
                     else:
@@ -184,6 +254,40 @@ def get_linear_system(dim, stencil_type, x, y, z):
 
     data = { "size": (x, y, z), "A": matrix_value, "diag_a": matrix_diag, "b": right_hand_side }
     return data
+
+
+def processPGC(size, data_A, tile_x, tile_y, stencil_type, dims):
+    x, y, z = size
+    n = x * y * z
+    stencil_stages_3d = [1, 2, 3, 7]
+    num_tile_x = math.ceil(x / tile_x)
+    num_tile_y = math.ceil(y / tile_y)
+    num_tiles = num_tile_x * num_tile_y
+    stencil_length = data_A.shape[1]
+    dim_shape_A = (num_tiles * z + stencil_stages_3d[stencil_type] - 1, tile_x, tile_y, stencil_length)
+    matrix_value = np.zeros(dim_shape_A)
+    stencil_id2stage_3d = [
+        [0, 0, 0],
+        [0, 0, 0, 1, 1, 1],
+        [0, 0, 0, 1, 1, 2],
+        [0, 0, 0, 1, 1, 2, 2, 2, 3, 4, 4, 5, 6]
+    ]
+    id2stage = stencil_id2stage_3d[stencil_type]
+    if dims == 3:
+        for out_i in range(num_tile_x):
+            for out_j in range(num_tile_y):
+                for k in range(z):
+                    tile_idx = out_i * num_tile_y + out_j
+                    dim_0 = tile_idx * z + k
+                    for in_i in range(tile_x):
+                        for in_j in range(tile_y):
+                            total_i = out_i * tile_x + in_i
+                            total_j = out_j * tile_y + in_j
+                            addr = total_i * y * z + total_j * z + k
+                            if addr < n:
+                                for l in range(stencil_length):
+                                    matrix_value[dim_0 + id2stage[l]][in_i][in_j][l] = data_A[addr][l]
+    return matrix_value
 
 def preprocess(data, tile_x, tile_y, stencil_type, dims):
     x, y, z = data["size"]
@@ -203,9 +307,8 @@ def preprocess(data, tile_x, tile_y, stencil_type, dims):
     padd_y = get_num_halo_points(stencil_type, dims, 1, tile_x)
     halo_x = np.zeros((num_tiles*z, padd_x), dtype=object)
     halo_y = np.zeros((num_tiles*z, padd_y), dtype=object)
-    # halo_x_index = np.zeros((num_tiles*z, padd_x), dtype=object)
-    # halo_y_index = np.zeros((num_tiles*z, padd_y), dtype=object)
     b_valid = np.zeros(dim_shape, dtype=np.int8)
+    matrix_value = processPGC(data["size"], data['A'], tile_x, tile_y, stencil_type, dims)
     # domain data
     for out_i in range(num_tile_x):
         for out_j in range(num_tile_y):
@@ -218,11 +321,11 @@ def preprocess(data, tile_x, tile_y, stencil_type, dims):
                         total_j = out_j * tile_y + in_j
                         addr = total_i * y * z + total_j * z + k
                         if addr < n:
-                            matrix_value[dim_0][in_i][in_j] = data["A"][addr]
+                            # matrix_value[dim_0][in_i][in_j] = data["A"][addr]
                             matrix_diag[dim_0][in_i][in_j] = data["diag_a"][addr]
                             right_hand_side[dim_0][in_i][in_j] = data["b"][addr]
                         else:
-                            matrix_value[dim_0][in_i][in_j] = np.zeros(stencil_length)
+                            # matrix_value[dim_0][in_i][in_j] = np.zeros(stencil_length)
                             matrix_diag[dim_0][in_i][in_j] = 1
                             right_hand_side[dim_0][in_i][in_j] = 0
 
@@ -330,7 +433,7 @@ def preprocess(data, tile_x, tile_y, stencil_type, dims):
                                 b_valid[halo_x[dim_0][p]] += ((1 << 2) + (1 << 1))
 
                     for p in range(padd_y):
-                        halo_tile_x = out_i if p < 2 * tile_x else out_i + 1
+                        halo_tile_x = out_i if p < 2 * tile_x - 1 else out_i + 1
                         halo_tile_y = out_j + 1
                         halo_tile_idx = halo_tile_x * num_tile_y + halo_tile_y
                         halo_dim_0 = halo_tile_idx * z + k if halo_tile_x < num_tile_x and halo_tile_y < num_tile_y else -1

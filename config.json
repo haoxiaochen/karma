@@ -1,16 +1,20 @@
 {
-    "StencilType": 0,
+    "StencilType": 1,
     "NumDims": 3,
     "Freq": 0.5,
     "Arch": {
         "NumPEs": [8, 8],
-        "VecLanes": 3,
+        "VecLanes": 2,
         "AggAdders": 2,
-        "HaloLanes": [8, 8]
+        "HaloLanes": [16, 16]
     },
     "Mem": {
-        "Depth": 16,
-        "DRAM_BW": 115,
+        "Depth": 32,
+        "SpMat_DRAM_BW": 115,
+        "Domain_DRAM_BW": 115,
+        "Halo_DRAM_BW": 115
+    },
+    "SRAM": {
         "DomainMtx_BW": 128,
         "DomainVec_BW": 128,
         "HaloVec_BW": 128

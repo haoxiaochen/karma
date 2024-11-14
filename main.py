@@ -5,6 +5,7 @@ import os
 from loguru import logger
 from MtxGen import get_linear_system, preprocess
 from Accelerator import *
+import time
 
 def read_config(file_path):
     with open(file_path, 'r') as file:
@@ -16,14 +17,34 @@ if __name__ == "__main__":
         print("Usage: python main.py <config_file> x y z")
         sys.exit(1)
 
-    log_path = "log/compute.log"
-    if os.path.exists(log_path):
-        os.remove(log_path)
-
+    # log_dir = "./log"
     logger.remove()
+    aggr_log_path = "log/aggr.log"
+    scalar_log_path = "log/scalar.log"
+    vec_log_path = "log/vec.log"
+    heu_log_path = "log/heu.log"
+    compute_log_path = "log/compute.log"
 
-    # logger.add(log_path, level="DEBUG")
-    logger.add(log_path, format="<level>{message}</level>",
+    if os.path.exists(aggr_log_path):
+        os.remove(aggr_log_path)
+    if os.path.exists(vec_log_path):
+        os.remove(vec_log_path)
+    if os.path.exists(scalar_log_path):
+        os.remove(scalar_log_path)
+    if os.path.exists(heu_log_path):
+        os.remove(heu_log_path)
+    if os.path.exists(compute_log_path):
+        os.remove(compute_log_path)
+
+    logger.add(aggr_log_path, format="<level>{message}</level>",
+               level="TRACE", filter=lambda r: "Aggregator" in r["message"])
+    logger.add(scalar_log_path, format="<level>{message}</level>",
+               level="TRACE", filter=lambda r: "ScalarUnit" in r["message"])
+    logger.add(vec_log_path, format="<level>{message}</level>",
+               level="TRACE", filter=lambda r: "VectorUnit" in r["message"])
+    logger.add(heu_log_path, format="<level>{message}</level>",
+               level="TRACE", filter=lambda r: "HEU" in r["message"])
+    logger.add(compute_log_path, format="<level>{message}</level>",
                level="TRACE", filter=lambda r: "PE(0, 0) ScalarUnit: compute variable" in r["message"])
 
     config_file = sys.argv[1]
@@ -42,6 +63,8 @@ if __name__ == "__main__":
     env = simpy.Environment()
     acc = Accelerator(env, config, data, progressbar=True)
     proc = env.process(acc.wait_for_finish())
+    start_time = time.time()
     env.run(until=proc)
-    print("\nCorrectness:", acc.check_correctness())
+    print(f"\nSimulation Time: {time.time() - start_time:.2f}s")
+    print("Correctness:", acc.check_correctness())
     acc.print()
