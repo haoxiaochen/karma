@@ -1,10 +1,10 @@
 {
-    "StencilType": 1,
+    "StencilType": 3,
     "NumDims": 3,
     "Freq": 0.5,
     "Arch": {
         "NumPEs": [8, 8],
-        "VecLanes": 2,
+        "VecLanes": 4,
         "AggAdders": 2,
         "HaloLanes": [16, 16]
     },

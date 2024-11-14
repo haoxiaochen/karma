@@ -297,8 +297,6 @@ def preprocess(data, tile_x, tile_y, stencil_type, dims):
     num_tiles = num_tile_x * num_tile_y
     # store the tiling result in a 3D tensor
     dim_shape = (num_tiles*z, tile_x, tile_y)
-    stencil_length = len(data["A"][0])
-    matrix_value = np.zeros(dim_shape + (stencil_length,))
     matrix_diag = np.zeros(dim_shape)
     right_hand_side = np.ones(dim_shape)
     vec_index = np.zeros(dim_shape, dtype=object)
@@ -308,6 +306,7 @@ def preprocess(data, tile_x, tile_y, stencil_type, dims):
     halo_x = np.zeros((num_tiles*z, padd_x), dtype=object)
     halo_y = np.zeros((num_tiles*z, padd_y), dtype=object)
     b_valid = np.zeros(dim_shape, dtype=np.int8)
+
     matrix_value = processPGC(data["size"], data['A'], tile_x, tile_y, stencil_type, dims)
     # domain data
     for out_i in range(num_tile_x):
@@ -321,14 +320,11 @@ def preprocess(data, tile_x, tile_y, stencil_type, dims):
                         total_j = out_j * tile_y + in_j
                         addr = total_i * y * z + total_j * z + k
                         if addr < n:
-                            # matrix_value[dim_0][in_i][in_j] = data["A"][addr]
                             matrix_diag[dim_0][in_i][in_j] = data["diag_a"][addr]
                             right_hand_side[dim_0][in_i][in_j] = data["b"][addr]
                         else:
-                            # matrix_value[dim_0][in_i][in_j] = np.zeros(stencil_length)
                             matrix_diag[dim_0][in_i][in_j] = 1
                             right_hand_side[dim_0][in_i][in_j] = 0
-
                         vec_index[dim_0][in_i][in_j] = (total_i, total_j, k)
     # halo data
     for out_i in range(num_tile_x):
