@@ -28,7 +28,8 @@ class DRAM:
         self.name = name
         self.DRAM_BW = bw
         self.data = data
-        self.counter = 0
+        self.read_counter = 0
+        self.write_counter = 0
         self.proc_read = env.process(self.run_read())
         self.proc_write = env.process(self.run_write())
         self.actions = [self.proc_read, self.proc_write]
@@ -37,7 +38,7 @@ class DRAM:
         for i in range(self.data.iters):
             tick = self.env.now
             size = self.data.get_read_size()
-            self.counter += size
+            self.read_counter += size
             delay = ceil(size / self.DRAM_BW)
             yield self.env.timeout(delay)
             logger.trace(f"(Cycle {self.env.now}) DRAM: read {size} {self.name} values (iter {i}) takes {delay} cycles")
@@ -50,7 +51,7 @@ class DRAM:
             return
         for i in range(self.data.iters):
             size = self.data.get_write_size()
-            self.counter += size
+            self.write_counter += size
             delay = ceil(size / self.DRAM_BW)
             yield self.env.process(self.data.get_previous())
             logger.trace(f"(Cycle {self.env.now}) DRAM: write {size} {self.name} values (iter {i}) needs {delay} cycles")

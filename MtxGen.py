@@ -32,7 +32,7 @@ def get_affine_stencil_points(dim, stencil_type):
         # 3D-Star-7P/2D-Star-5P
         if dim == 2:
             stencil_points = [
-                (0, -1), (-1, 0),
+                (-1, 0), (0, -1),
             ]
         elif dim == 3:
             stencil_points = [
@@ -54,9 +54,8 @@ def get_affine_stencil_points(dim, stencil_type):
         # 3D-Diamond-13P / 2D-Diamond-7P
         if dim == 2:
             stencil_points = [
-                (0, -1),
-                (-1, 0),
-                (-1, 1),
+                (-1, 0), (0, -1),
+                (-1, -1),
             ]
         elif dim == 3:
             stencil_points = [
@@ -68,10 +67,9 @@ def get_affine_stencil_points(dim, stencil_type):
         # 3D-Box-27P / 2D-Box-9P
         if dim == 2:
             stencil_points = [
+                (-1, 0), (0, -1),
                 (-1, -1),
-                (0, -1),
-                (-1, 0),
-                (-1, 1),
+                (-1, -2),
             ]
         elif dim == 3:
             stencil_points = [
@@ -255,24 +253,43 @@ def get_linear_system(dim, stencil_type, x, y, z):
     data = { "size": (x, y, z), "A": matrix_value, "diag_a": matrix_diag, "b": right_hand_side }
     return data
 
+def get_stencil_stages(stencil_type, dims):
+    stencil_stages_3d = [1, 2, 3, 7]
+    stencil_stages_2d = [1, 2, 2, 3]
+    return stencil_stages_3d[stencil_type] if dims == 3 else stencil_stages_2d[stencil_type]
+
+def get_bubbles(num_tile_x, num_tile_y, stages):
+    bubbles = 0
+    for d in range(num_tile_y + num_tile_x - 1):
+        diag_len = min(num_tile_x, d + 1) - max(0, d + 1 - num_tile_y)
+        bubbles += max(0, stages - diag_len)
+    return bubbles
 
 def processPGC(size, data_A, tile_x, tile_y, stencil_type, dims):
     x, y, z = size
     n = x * y * z
-    stencil_stages_3d = [1, 2, 3, 7]
     num_tile_x = math.ceil(x / tile_x)
     num_tile_y = math.ceil(y / tile_y)
     num_tiles = num_tile_x * num_tile_y
-    stencil_length = data_A.shape[1]
-    dim_shape_A = (num_tiles * z + stencil_stages_3d[stencil_type] - 1, tile_x, tile_y, stencil_length)
+    stencil_length = data_A.shape[-1]
+    stages = get_stencil_stages(stencil_type, dims)
+    bubbles = get_bubbles(num_tile_x, num_tile_y, stages) if dims == 2 else (stages - 1)
+    dim_shape_A = (num_tiles * z + bubbles, tile_x, tile_y, stencil_length)
     matrix_value = np.zeros(dim_shape_A)
+    A_valid = np.ones(num_tiles * z + bubbles, dtype=np.bool)
     stencil_id2stage_3d = [
         [0, 0, 0],
         [0, 0, 0, 1, 1, 1],
         [0, 0, 0, 1, 1, 2],
         [0, 0, 0, 1, 1, 2, 2, 2, 3, 4, 4, 5, 6]
     ]
-    id2stage = stencil_id2stage_3d[stencil_type]
+    stencil_id2stage_2d = [
+        [0, 0],
+        [0, 0, 1, 1],
+        [0, 0, 1],
+        [0, 0, 1, 2],
+    ]
+    id2stage = stencil_id2stage_3d[stencil_type] if dims == 3 else stencil_id2stage_2d[stencil_type]
     if dims == 3:
         for out_i in range(num_tile_x):
             for out_j in range(num_tile_y):
@@ -287,7 +304,30 @@ def processPGC(size, data_A, tile_x, tile_y, stencil_type, dims):
                             if addr < n:
                                 for l in range(stencil_length):
                                     matrix_value[dim_0 + id2stage[l]][in_i][in_j][l] = data_A[addr][l]
-    return matrix_value
+    else:
+        # schedule along diagonal
+        dim_0 = 0
+        for d in range(num_tile_y + num_tile_x - 1):
+            diag_len = min(num_tile_x, d + 1) - max(0, d + 1 - num_tile_y)
+            for out_i in range(max(0, d + 1 - num_tile_y), min(num_tile_x, d + 1)):
+                out_j = d - out_i
+                for in_i in range(tile_x):
+                    for in_j in range(tile_y):
+                        total_i = out_i * tile_x + in_i
+                        total_j = out_j * tile_y + in_j
+                        addr = total_i * y + total_j
+                        if addr < n:
+                            for l in range(stencil_length):
+                                assert(dim_0 + id2stage[l] < dim_shape_A[0])
+                                matrix_value[dim_0 + id2stage[l]][in_i][in_j][l] = data_A[addr][l]
+                dim_0 += 1
+
+            bubbles = max(0, stages - diag_len)
+            for i in range(bubbles):
+                A_valid[dim_0 + i] = False
+            dim_0 += bubbles
+
+    return matrix_value, A_valid
 
 def preprocess(data, tile_x, tile_y, stencil_type, dims):
     x, y, z = data["size"]
@@ -307,7 +347,7 @@ def preprocess(data, tile_x, tile_y, stencil_type, dims):
     halo_y = np.zeros((num_tiles*z, padd_y), dtype=object)
     b_valid = np.zeros(dim_shape, dtype=np.int8)
 
-    matrix_value = processPGC(data["size"], data['A'], tile_x, tile_y, stencil_type, dims)
+    matrix_value, A_valid = processPGC(data["size"], data['A'], tile_x, tile_y, stencil_type, dims)
     # domain data
     for out_i in range(num_tile_x):
         for out_j in range(num_tile_y):
@@ -441,7 +481,11 @@ def preprocess(data, tile_x, tile_y, stencil_type, dims):
                             else:
                                 b_valid[halo_y[dim_0][p]] += (1 << 3) # agg_j
 
-    data = { "size": (x, y, z), "A": matrix_value, "diag_A": matrix_diag, "b": right_hand_side,
-                                "b_valid": b_valid, "ijk": vec_index,
-                                "halo_x": halo_x, "halo_y": halo_y, "x": np.zeros((x,y,z), dtype=object) }
+    data = {
+        "size": (x, y, z), "A": matrix_value,
+        "diag_A": matrix_diag, "b": right_hand_side,
+        "b_valid": b_valid, "ijk": vec_index,
+        "A_valid": A_valid, "halo_x": halo_x,
+        "halo_y": halo_y, "x": np.zeros((x,y,z), dtype=object)
+    }
     return data

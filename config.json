@@ -3,7 +3,7 @@
     "NumDims": 3,
     "Freq": 0.5,
     "Arch": {
-        "NumPEs": [8, 8],
+        "NumPEs": [2, 2],
         "VecLanes": 4,
         "AggAdders": 2,
         "HaloLanes": [16, 16]
@@ -25,10 +25,13 @@
         "Add": 1
     },
     "Energy": {
-        "DRAM": 1,
-        "SRAM": 1,
-        "Add": 1,
-        "Mul": 1,
-        "Div": 1
+        "DRAM_read_per_data": 100.56,
+        "DRAM_write_per_data": 133.50,
+        "DomainVectorBuffer_per_data": 16.15,
+        "DomainSpMatBuffer_per_data": 28.56,
+        "HaloVectorBuffer_per_data": 8.27,
+        "Add": 0.79,
+        "Mul": 5.63,
+        "Div": 50.71
     }
 }

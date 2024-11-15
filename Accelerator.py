@@ -112,7 +112,7 @@ class DomainSpMatData:
         for _ in range(int(min(self.Z_depth, self.dim0_extent - self.put_dim0_idx))):
             for i in range(self.tile_X):
                 for j in range(self.tile_Y):
-                    yield self.domain_mtx[i][j].put(self.data["A"][self.put_dim0_idx][i][j])
+                    yield self.domain_mtx[i][j].put((self.data["A"][self.put_dim0_idx][i][j], self.data['A_valid'][self.put_dim0_idx]))
                     logger.trace(f"(Cycle {self.env.now}) DomainSpMatData: put spmat data of row to PE({i}, {j}) with index={self.put_dim0_idx}")
             self.put_dim0_idx += 1
 
@@ -288,12 +288,28 @@ class Accelerator:
 
         ideal_cycles = math.ceil(math.prod(self.data["size"]) / (self.tile_X * self.tile_Y)) * delay
 
-        domain_counter = self.domain_dram.counter + self.domain_spmat_dram.counter
-        halo_counter = self.halo_dram_X.counter + self.halo_dram_Y.counter
-        dram_energy = (domain_counter + halo_counter) * self.cfg["Energy"]["DRAM"]
+        read_counter = self.domain_dram.read_counter + \
+                        self.domain_spmat_dram.read_counter + \
+                        self.halo_dram_X.read_counter + \
+                        self.halo_dram_Y.read_counter
+        write_counter = self.domain_dram.write_counter + \
+                        self.domain_spmat_dram.write_counter + \
+                        self.halo_dram_X.write_counter + \
+                        self.halo_dram_Y.write_counter
+
+        domain_counter = self.domain_dram.read_counter + self.domain_dram.write_counter + \
+                        self.domain_spmat_dram.read_counter + self.domain_spmat_dram.write_counter
+        halo_counter = self.halo_dram_X.read_counter + self.halo_dram_X.write_counter + \
+                        self.halo_dram_Y.read_counter + self.halo_dram_Y.write_counter
+
+        dram_energy = read_counter * self.cfg["Energy"]["DRAM_read_per_data"] + \
+                      write_counter * self.cfg["Energy"]["DRAM_write_per_data"]
+
         domain_vector = self.buffers.domain_vec_in.counter + self.buffers.domain_vec_out.counter
         halo_vector = self.buffers.halo_vec_in.counter + self.buffers.halo_vec_out.counter
-        sram_energy = (domain_vector + halo_vector + self.buffers.domain_mtx.counter + self.buffers.domain_diag_mtx.counter)*self.cfg["Energy"]["SRAM"]
+        sram_energy = (domain_vector + self.buffers.domain_diag_mtx.counter) * self.cfg["Energy"]["DomainVectorBuffer_per_data"] + \
+                    halo_vector * self.cfg["Energy"]["HaloVectorBuffer_per_data"] + \
+                    self.buffers.domain_mtx.counter * self.cfg["Energy"]["DomainSpMatBuffer_per_data"]
 
         PE_mul, PE_div, PE_add = self.PE_Array.stat()
         HEU_add = self.HEU_X.add_counter + self.HEU_Y.add_counter

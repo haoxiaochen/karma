@@ -52,11 +52,7 @@ if __name__ == "__main__":
         print("Usage: python main.py <config_file> x y z [debug_flag]")
         sys.exit(1)
 
-    # log_dir = "./log"
-    debug_flag = True if len(sys.argv) > 5 and sys.argv[5] == "debug" else False
-    logger.remove()
-    if debug_flag:
-        dump_debug_log()
+
 
     config_file = sys.argv[1]
     config = read_config(config_file)
@@ -66,8 +62,15 @@ if __name__ == "__main__":
     y = int(sys.argv[3])
     if dims == 3:
         z = int(sys.argv[4])
+        debug_flag = False if len(sys.argv) < 5 else True
     else:
         z = 1
+        debug_flag = False if len(sys.argv) < 4 else True
+
+    logger.remove()
+    if debug_flag:
+        dump_debug_log()
+
     data = get_linear_system(dims, stencil, x, y, z)
     data = preprocess(data, config["Arch"]["NumPEs"][0], config["Arch"]["NumPEs"][1], stencil, dims)
     env = simpy.Environment()
