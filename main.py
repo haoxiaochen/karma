@@ -19,6 +19,7 @@ def dump_debug_log():
     vec_log_path = "log/vec.log"
     heu_log_path = "log/heu.log"
     compute_log_path = "log/compute.log"
+    domain_data_log_path = "log/domain_data.log"
 
     if os.path.exists(all_log_path):
         os.remove(all_log_path)
@@ -32,6 +33,8 @@ def dump_debug_log():
         os.remove(heu_log_path)
     if os.path.exists(compute_log_path):
         os.remove(compute_log_path)
+    if os.path.exists(domain_data_log_path):
+        os.remove(domain_data_log_path)
 
     logger.add(all_log_path, format="<level>{message}</level>",
             level="TRACE", filter=lambda r: "" in r["message"])
@@ -45,14 +48,13 @@ def dump_debug_log():
             level="TRACE", filter=lambda r: "HEU" in r["message"])
     logger.add(compute_log_path, format="<level>{message}</level>",
             level="TRACE", filter=lambda r: "PE(0, 0) ScalarUnit: compute variable" in r["message"])
-
+    logger.add(domain_data_log_path, format="<level>{message}</level>",
+            level="TRACE", filter=lambda r: "DomainData" in r["message"])
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python main.py <config_file> x y z [debug_flag]")
         sys.exit(1)
-
-
 
     config_file = sys.argv[1]
     config = read_config(config_file)
@@ -62,17 +64,24 @@ if __name__ == "__main__":
     y = int(sys.argv[3])
     if dims == 3:
         z = int(sys.argv[4])
-        debug_flag = False if len(sys.argv) < 5 else True
+        debug_flag = False if len(sys.argv) < 6 else True
     else:
         z = 1
-        debug_flag = False if len(sys.argv) < 4 else True
+        debug_flag = False if len(sys.argv) < 5 else True
 
     logger.remove()
+    print(f"Debug Mode: {debug_flag}")
     if debug_flag:
         dump_debug_log()
 
+    start_time = time.time()
     data = get_linear_system(dims, stencil, x, y, z)
+    print(f"Creating linear system finished, used time: {time.time() - start_time:.2f}s")
+
+    start_time = time.time()
     data = preprocess(data, config["Arch"]["NumPEs"][0], config["Arch"]["NumPEs"][1], stencil, dims)
+    print(f"Data preprocessing finished, used time: {time.time() - start_time:.2f}s")
+
     env = simpy.Environment()
     acc = Accelerator(env, config, data, progressbar=True)
     proc = env.process(acc.wait_for_finish())

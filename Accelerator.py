@@ -66,7 +66,7 @@ class DomainData:
                     # wait until b is valid (on halo and wholly updated by HEU)
                     while self.data["b_valid"][self.put_dim0_idx_b][i][j] > 0:
                         # ijk = self.data["ijk"][self.put_dim0_idx_b][i][j]
-                        # print(f"waiting for b{ijk} to be valid, current valid state={self.data["b_valid"][self.put_dim0_idx_b][i][j]}")
+                        # print(f"waiting for b{ijk} to be valid, current valid state={bin(self.data["b_valid"][self.put_dim0_idx_b][i][j])}")
                         yield self.env.timeout(1)
                     yield self.domain_vec_in[i][j].put(self.data["b"][self.put_dim0_idx_b][i][j])
                     logger.trace(f"(Cycle {self.env.now}) DomainData: put b of row {self.data['ijk'][self.put_dim0_idx_b][i][j]} to PE({i}, {j})")
@@ -269,22 +269,18 @@ class Accelerator:
         return True
 
     def print(self):
-        wall_clock_time = self.env.now / (self.cfg["Freq"]*1e9)
+        wall_clock_time = self.env.now / (self.cfg["Freq"] * 1e9)
         # add mul div
         stencil_type = self.cfg["StencilType"]
         stencil_points = self.data['A'].shape[-1]
         vec_lanes = self.cfg['Arch']['VecLanes']
-        mul_cycles = math.ceil(stencil_points / vec_lanes)
-        delay_arr = [
-            [1, mul_cycles, 1],
-            [2, mul_cycles, 1],
-            [1, mul_cycles, 1],
-            [1, mul_cycles, 1],
-        ]
+        mul_num = math.ceil(stencil_points / vec_lanes)
+        div_num = 1
+        add_num = [1, 2, 1, 1]
 
-        delay = self.cfg['Delay']['Add'] * delay_arr[stencil_type][0] + \
-                self.cfg['Delay']['Mul'] * delay_arr[stencil_type][1] + \
-                self.cfg['Delay']['Div'] * delay_arr[stencil_type][2]
+        delay = self.cfg['Delay']['Add'] * add_num[stencil_type] + \
+                self.cfg['Delay']['Mul'] * mul_num + \
+                self.cfg['Delay']['Div'] * div_num
 
         ideal_cycles = math.ceil(math.prod(self.data["size"]) / (self.tile_X * self.tile_Y)) * delay
 
